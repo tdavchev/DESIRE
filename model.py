@@ -30,13 +30,18 @@ class DESIREModel(object):
 
     def __init__(self, args):
         args = args
+        # input depth = sequence
+        # input_height = max number of people
+        # input width = id,x,y
+        temporal_kernel_size = 2
+        temporal_num_channels = 1
+        temporal_depth = 2
         input_size = 3
         rnn_size = args.rnn_size # hidden_features
         seq_length = args.seq_length # time_steps
         encoder_output = 512
         num_layers = args.num_layers
         batch_size = args.batch_size
-        output_classes = 5 #primerno
         latent_size = args.latent_size
         input_shape = [int(np.sqrt(2*rnn_size)), int(np.sqrt(2*rnn_size))]
         vae_input_size = np.prod(input_shape)
@@ -95,6 +100,9 @@ class DESIREModel(object):
         '''
         Building the DESIRE Model
         '''
+        # TODO: fix input size to be of size MNPx3 and convolve over the MNPx2D matrix
+
+        temporal_x = tf.placeholder("float", [None, seq_length, input_size, 1])
         xval = tf.placeholder("float", [None, seq_length, input_size])
         hidden_state_x = tf.placeholder("float", [None, rnn_size], name="Hidden_x")
         yval_enc = tf.placeholder("float", [None, seq_length, input_size])
@@ -104,6 +112,10 @@ class DESIREModel(object):
 
         # Weights adn Biases for hidden layer and output layer
         # TODO:Make sure you learn the dimensionalities!!!!!
+        temporal_w = tf.Variable(tf.random_normal( \
+            [1, temporal_kernel_size, temporal_num_channels, temporal_depth]))
+        temporal_b = tf.Variable(tf.random_normal([temporal_num_channels*temporal_depth]))
+
         w_hidden_enc1 = tf.Variable(tf.random_normal([vae_input_size, vae_input_size]))
         b_hidden_enc1 = tf.Variable(tf.random_normal([vae_input_size]))
 
@@ -114,6 +126,12 @@ class DESIREModel(object):
         b_out = tf.Variable(tf.random_normal([output_classes]))
 
         # The Formula for the Model
+        # Temporal convolution
+        rho_i = tf.nn.relu(tf.add( \
+            tf.nn.depthwise_conv2d(temporal_x, temporal_w, [1, 1, 1, 1], padding='VALID'),
+            temporal_b))
+
+        # Encoder
         input_x_ = tf.reshape(xval, [-1, input_size])
         lstm_cell = tf.nn.rnn_cell.GRUCell(rnn_size)
         input_x_2 = tf.split(0, seq_length, input_x_)
@@ -128,7 +146,6 @@ class DESIREModel(object):
         cells_y = tf.nn.rnn_cell.MultiRNNCell([lstm_cell]* num_layers, state_is_tuple=True)
         hidden_state_y = cells_y.zero_state(batch_size, tf.float32)
 
-        # Encoder
         with tf.variable_scope("encoder1"):
             _, enc_state_x = rnn.rnn(cells, input_x_2, dtype=dtypes.float32)
 
@@ -147,7 +164,7 @@ class DESIREModel(object):
         # epsilon is a sample from a N(0, 1) distribution
         # Encode our data into z and return the mean and covariance
         # TODO: Checkout the batch size, seq size
-        with tf.variable_scope("zval34321"):
+        with tf.variable_scope("zval"):
             z_mean, z_log_sigma_sq = vae_encoder(vae_inputs, latent_size)
             eps_batch = z_log_sigma_sq.get_shape().as_list()[0] \
                 if z_log_sigma_sq.get_shape().as_list()[0] is not None else batch_size
@@ -167,4 +184,3 @@ class DESIREModel(object):
         decoder1_inputs = tf.split(0, batch_size, decoder1_inputs)
         with tf.variable_scope("decoder1"):
             outputs, state = seq2seq.rnn_decoder(decoder1_inputs, enc_state_x, cells)
-
