@@ -73,12 +73,6 @@ class deconv2d(prettytensor.VarStoreMethod):
           ValueError: If head is not a rank 4 tensor or the  depth of the input
             (4th dim) is not known.
         """
-        print input_layer
-        print kernel
-        print depth
-        print stride
-        print init
-        print "----------"
         if len(input_layer.shape) != 4:
             raise ValueError(
                 'Cannot perform conv2d on tensor with shape %s' % input_layer.shape)
@@ -105,9 +99,6 @@ class deconv2d(prettytensor.VarStoreMethod):
 
         input_height = input_layer.shape[1]
         input_width = input_layer.shape[2]
-
-        print input_height, input_width
-        print "##########"
 
         filter_height = kernel[0]
         filter_width = kernel[1]
@@ -174,9 +165,7 @@ def get2d_deconv_output_size(input_height, input_width, filter_height,
         out_cols = (input_width.value - 1) * col_stride + filter_width.value
     elif padding_type == "SAME":
         out_cols = input_width.value * col_stride
-    
-    print out_cols, out_rows
-    print "out_cols, out_rows ^^^"
+
     return out_rows, out_cols
 
 
