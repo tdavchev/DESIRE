@@ -68,8 +68,8 @@ class DESIREModel(object):
         '''
         Building the DESIRE Model
         '''
-        # TODO: fix input size to be of size MNPx3 and convolve over the MNPx2D matrix
-        # TODO: fix temporal_x to be of seqxMNPxinput sizeinstead
+        # TODO: fix input size to be of size MNOx3 and convolve over the MNOx2D matrix
+        # TODO: fix temporal_x to be of seqxMNOxinput sizeinstead
         self.temporal_x = tf.placeholder("float", [self.seq_length, self.input_size, 1])
         self.input_data = tf.placeholder(tf.float32, \
             [self.args.seq_length, self.args.max_num_obj, self.input_size], name="input_data")
@@ -133,7 +133,8 @@ class DESIREModel(object):
         # Containers to store output distribution parameters
         with tf.name_scope("Distribution_parameters_stuff"):
             self.initial_output = \
-                tf.split(0, self.args.max_num_obj, tf.zeros([self.args.max_num_obj, self.output_size]))
+                tf.split(0, self.args.max_num_obj, \
+                    tf.zeros([self.args.max_num_obj, self.output_size]))
 
         # Tensor to represent non-existent ped
         with tf.name_scope("Non_existent_ped_stuff"):
@@ -225,8 +226,8 @@ class DESIREModel(object):
                     loss = tf.reduce_mean(reconstr_loss+kld_loss)
 
                 with tf.name_scope("increment_cost"):
-                    # If it is a non-existent ped, it should not contribute to cost
-                    # If the ped doesn't exist in the next frame, he/she should not
+                    # If it is a non-existent object, it should not contribute to cost
+                    # If the object doesn't exist in the next frame, he/she/it should not
                     # contribute to cost as well
                     self.cost = tf.select( \
                         tf.logical_or( \
