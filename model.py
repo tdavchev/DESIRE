@@ -47,6 +47,7 @@ class DESIREModel(object):
         self.vae_input_size = np.prod(self.input_shape)
         self.max_num_obj = args.max_num_obj
 
+        self.output_states = None
         self.input_data = None
         self.target_data_enc = None
         self.target_data = None
@@ -55,8 +56,6 @@ class DESIREModel(object):
         self.acc_summary = None
         self.learning_rate = None
         self.output_size = None
-        self.hidden_state_x = None
-        self.hidden_state_y = None
         self.gru_states = None
         self.output_states = None
         self.spatial_input = None
@@ -74,10 +73,8 @@ class DESIREModel(object):
         # self.temporal_data = tf.placeholder("float", [seq_length, input_size, 1])
         self.input_data = tf.placeholder(tf.float32, \
             [self.args.seq_length, self.args.max_num_obj, self.input_size], name="input_data")
-        self.hidden_state_x = tf.placeholder("float", [self.rnn_size], name="Hidden_x")
         self.target_data_enc = tf.placeholder("float", \
             [self.seq_length, self.args.max_num_obj, self.input_size], name="target_data_enc")
-        self.hidden_state_y = tf.placeholder(tf.float32, [self.rnn_size], name="Hidden_y")
         self.target_data = tf.placeholder("float", \
             [self.seq_length, self.args.max_num_obj, self.input_size], name="target_data")
         self.learning_rate = \
@@ -97,21 +94,25 @@ class DESIREModel(object):
         # Encoder
         with tf.variable_scope("gru_cell"):
             lstm_cell = tf.nn.rnn_cell.GRUCell(self.rnn_size)
-            cells = tf.nn.rnn_cell.MultiRNNCell([lstm_cell]* num_layers, state_is_tuple=False)
+            cells = tf.nn.rnn_cell.MultiRNNCell([lstm_cell]*self.num_layers, state_is_tuple=False)
 
         with tf.variable_scope("gru_y_cell"):
             lstm_cell_y = tf.nn.rnn_cell.GRUCell(self.rnn_size)
-            cells_y = tf.nn.rnn_cell.MultiRNNCell([lstm_cell]* num_layers, state_is_tuple=False)
+            cells_y = tf.nn.rnn_cell.MultiRNNCell([lstm_cell]*self.num_layers, state_is_tuple=False)
 
         # Define LSTM states for each pedestrian
         with tf.variable_scope("gru_states"):
-            self.gru_states = tf.zeros([args.max_num_obj, cells.state_size], name="gru_states")
-            self.enc_state_x = tf.split(0, args.max_num_obj, self.gru_states)
-            self.enc_state_y = tf.split(0, args.max_num_obj, self.gru_states)
+            self.gru_states = tf.zeros([self.args.max_num_obj, cells.state_size], name="gru_states")
+            self.enc_state_x = tf.split(0, self.args.max_num_obj, self.gru_states)
+
+        with tf.variable_scope("gru_states_y"):
+            self.gru_states_y = \
+                tf.zeros([self.args.max_num_obj, cells_y.state_size], name="gru_states_y")
+            self.enc_state_y = tf.split(0, self.args.max_num_obj, self.gru_states_y)
 
         # Define hidden output states for each pedestrian
         with tf.variable_scope("output_states"):
-            output_states = \
+            self.output_states = \
                 tf.split(0, self.args.max_num_obj, \
                     tf.zeros([self.args.max_num_obj, cells.output_size]))
 
@@ -144,25 +145,26 @@ class DESIREModel(object):
         for seq, frame in enumerate(frame_data):
             current_frame_data = frame  # MNP x 3 tensor
             current_target_frame_data = frame_target_data[seq] # MNP x 3 tensor
-            for obj in xrange(0, args.max_num_obj):
+            for obj in xrange(0, self.args.max_num_obj):
+                print obj
                 obj_id = current_frame_data[obj, 0]
                 with tf.name_scope("extract_input_obj"):
                     spatial_input_x = tf.slice(current_frame_data, [obj, 1], [1, 2])
                     spatial_input_y = tf.slice(current_target_frame_data, [obj, 1], [1, 2])
 
-                with tf.variable_scope("encoding_operations_x") as scope:
-                    if seq > 0 or obj > 0:
-                        scope.reuse_variables()
-                    _, self.enc_state_x = rnn.rnn(cells, [spatial_input_x], dtype=dtypes.float32)
+                with tf.variable_scope("encoding_operations_x", \
+                            reuse=True if obj > 0 or seq > 0 else None):
+                    _, self.enc_state_x[obj] = \
+                        rnn.rnn(cells, [spatial_input_x], dtype=dtypes.float32)
 
-                with tf.variable_scope("encoding_operations_y") as scope:
-                    if seq > 0 or obj > 0:
-                        scope.reuse_variables()
-                    _, self.enc_state_y = rnn.rnn(cells_y, [spatial_input_y], dtype=dtypes.float32)
+                with tf.variable_scope("encoding_operations_y", \
+                            reuse=True if obj > 0 or seq > 0 else None):
+                    _, self.enc_state_y[obj] = \
+                        rnn.rnn(cells_y, [spatial_input_y], dtype=dtypes.float32)
 
                 with tf.name_scope("concatenate_embeddings"):
                     # Concatenate the summaries c1 and c2
-                    complete_input = tf.concat(1, [self.enc_state_x, self.enc_state_y])
+                    complete_input = tf.concat(1, [self.enc_state_x[obj], self.enc_state_y[obj]])
 
                 # fc layer
                 with tf.variable_scope("fc_c"):
@@ -174,15 +176,17 @@ class DESIREModel(object):
                 # z = mu + sigma * epsilon
                 # epsilon is a sample from a N(0, 1) distribution
                 # Encode our data into z and return the mean and covariance
-                with tf.variable_scope("zval"):
-                    z_mean, z_log_sigma_sq = vae_encoder(vae_inputs, self.latent_size)
+                with tf.variable_scope("zval", reuse=True if obj > 0 or seq > 0 else None):
+                    z_mean, z_log_sigma_sq = \
+                        self.vae_encoder(vae_inputs, self.latent_size)
                     eps_batch = z_log_sigma_sq.get_shape().as_list()[0] \
                         if z_log_sigma_sq.get_shape().as_list()[0] is not None else self.batch_size
                     eps = tf.random_normal(
                         [eps_batch, self.latent_size], 0.0, 1.0, dtype=tf.float32)
                     zval = tf.add(z_mean, tf.mul(tf.sqrt(tf.exp(z_log_sigma_sq)), eps))
                     # Get the reconstructed mean from the decoder
-                    x_reconstr_mean = vae_decoder(zval, self.vae_input_size)
+                    x_reconstr_mean = \
+                        self.vae_decoder(zval, self.vae_input_size)
                     z_summary = tf.summary.histogram("zval", zval)
 
                 # fc layer
@@ -194,15 +198,22 @@ class DESIREModel(object):
                     multipl = tf.nn.softmax(multipl)
 
                 # Decoder 1
-                with tf.variable_scope("hidden_states"):
-                    self.hidden_state_x = tf.mul(multipl, self.enc_state_x)
-                    output_states, self.hidden_state_x = \
-                        seq2seq.rnn_decoder([self.hidden_state_x], self.enc_state_x, cells)
+                with tf.variable_scope("hidden_states", reuse=True if obj > 0 or seq > 0 else None):
+                    hidden_state_x = tf.mul(multipl, self.enc_state_x[obj])
+                    self.output_states[obj], self.enc_state_x[obj] = \
+                        seq2seq.rnn_decoder(
+                            [hidden_state_x],
+                            self.enc_state_x[obj],
+                            cells)
+                    self.output_states[obj] = tf.squeeze(self.output_states[obj], [0])
 
                 # Apply the linear layer. Output would be a tensor of shape 1 x output_size
                 with tf.name_scope("output_linear_layer"):
                     self.initial_output[obj] = \
-                        tf.nn.xw_plus_b(output_states[obj], weights["output_w"], biases["output_b"])
+                        tf.nn.xw_plus_b(
+                            self.output_states[obj],
+                            weights["output_w"],
+                            biases["output_b"])
 
                 with tf.name_scope("extract_target_obj"):
                     # Extract x and y coordinates of the target data
@@ -255,7 +266,7 @@ class DESIREModel(object):
         tvars = tf.trainable_variables()
 
         # Get the final LSTM states
-        self.final_states = tf.concat(0, self.hidden_state_x)
+        self.final_states = tf.concat(0, self.enc_state_x)
 
         # Get the final distribution parameters
         self.final_output = self.initial_output
@@ -269,8 +280,29 @@ class DESIREModel(object):
         # Define the optimizer
         optimizer = tf.train.AdamOptimizer(learning_rate=self.learning_rate).minimize(loss)
 
+        # self.loss_summary = tf.scalar_summary("loss", loss)
+        # self.cost_summary = tf.scalar_summary("cost", self.cost)
+        # self.summaries = tf.merge_all_summaries()
+        # self.summary_writer = tf.train.SummaryWriter( \
+        #     "logs/" + self.get_name() + self.get_formatted_datetime(), sess.graph)
+
         # The train operator
         # train_op = optimizer.apply_gradients(zip(grads, tvars))
+
+    def get_name(self):
+        '''formated name'''
+        return "cvae_input_%dx%d_latent%d_edim%d_ddim%d" % (self.input_shape[0],
+                                                            self.input_shape[
+                                                                1],
+                                                            self.latent_size,
+                                                            self.args.e_dim,
+                                                            self.args.d_dim)
+
+    def get_formatted_datetime(self):
+        '''formated datetime'''
+        return str(datetime.datetime.now()).replace(" ", "_") \
+                                            .replace("-", "_") \
+                                            .replace(":", "_")
 
     def define_weights(self):
         ''' Define Model's weights'''
@@ -281,7 +313,7 @@ class DESIREModel(object):
             weights["temporal_w"] = tf.Variable(tf.random_normal( \
                 [1, self.temporal_kernel_size, self.temporal_num_channels, self.temporal_depth]))
             biases["temporal_b"] = tf.Variable(tf.random_normal( \
-                [temporal_num_channels*temporal_depth]))
+                [self.temporal_num_channels*self.temporal_depth]))
 
         with tf.variable_scope("hidden_enc_weights"):
             weights["w_hidden_enc1"] = tf.Variable(tf.random_normal( \
@@ -314,7 +346,7 @@ class DESIREModel(object):
                                scale_after_normalization=True,
                                phase=phase):
             return (pt.wrap(zval).
-                    reshape([-1, 1, 1, latent_size]).
+                    reshape([-1, 1, 1, self.latent_size]).
                     deconv2d(4, 128, edges='VALID', phase=phase).
                     deconv2d(5, 64, edges='VALID', phase=phase).
                     deconv2d(5, 32, stride=2, phase=phase).
@@ -391,7 +423,7 @@ class DESIREModel(object):
         # step = tf.constant(1e-3, dtype=tf.float32, shape=(1, 1))
 
         # Calculate the PDF of the data w.r.t to the distribution
-        result0 = tf_2d_normal(x_data, y_data, z_mux, z_muy, z_sx, z_sy, z_corr)
+        result0 = self.tf_2d_normal(x_data, y_data, z_mux, z_muy, z_sx, z_sy, z_corr)
 
         # For numerical stability purposes
         epsilon = 1e-20
@@ -440,7 +472,8 @@ class DESIREModel(object):
         latent_loss = -0.5 * tf.reduce_sum(1.0 + z_log_sigma_sq \
                                                 - tf.square(z_mean) \
                                                 - tf.exp(z_log_sigma_sq), 1)
-        kld_loss = tf.reduce_mean(reconstr_loss + latent_loss)   # average over batch
+        # kld_loss = tf.reduce_mean(reconstr_loss + latent_loss)   # average over batch
+        kld_loss = tf.reduce_mean(latent_loss)   # average over batch
 
         return kld_loss
 
