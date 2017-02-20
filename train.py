@@ -70,7 +70,7 @@ def main():
     parser.add_argument('--grid_size', type=int, default=4,
                         help='Grid size of the social grid')
     # Maximum number of pedestrians to be considered
-    parser.add_argument('--max_num_obj', type=int, default=150,
+    parser.add_argument('--max_num_obj', type=int, default=100,
                         help='Maximum Number of Moving objects')
     # The leave out dataset
     parser.add_argument('--leave_dataset', type=int, default=5,
@@ -95,7 +95,7 @@ def train(args):
 
     # Create the DataLoader object
     data_loader = DataLoader(args.batch_size, args.seq_length,
-                             args.max_num_obj, args.leave_dataset)
+                             args.max_num_obj, args.leave_dataset, preprocess=False)
 
     with open(os.path.join('save', 'config.pkl'), 'wb') as file:
         pickle.dump(args, file)
@@ -117,7 +117,11 @@ def train(args):
         # For each epoch
         for epoch in range(args.num_epochs): #100
             # Assign the learning rate value for this epoch
-            sess.run(tf.assign(model.learning_rate, args.learning_rate * (args.decay_rate ** e)))
+            sess.run(
+                tf.assign(
+                    model.learning_rate, args.learning_rate * (args.decay_rate ** epoch)
+                    )
+                )
             # Reset the data pointers in the data_loader
             data_loader.reset_batch_pointer()
 

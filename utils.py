@@ -8,6 +8,7 @@ Date : 13th February 2017
 
 import os
 import pickle
+import random
 import numpy as np
 
 # The data loader class that loads data from the datasets considering
@@ -18,7 +19,7 @@ class DataLoader(object):
     # Eight is reasonable in this case.
 
     def __init__(self,
-                 batch_size=50, seq_length=5, max_num_obj=40, leave_dataset=1):
+                 batch_size=50, seq_length=5, max_num_obj=40, leave_dataset=1, preprocess=False):
         '''
         Initialiser function for the DataLoader class
         params:
@@ -47,7 +48,7 @@ class DataLoader(object):
         data_file = os.path.join(self.data_dir, "trajectories.cpkl")
 
         # If the file doesn't exist or forcePreProcess is true
-        if not os.path.exists(data_file):
+        if not os.path.exists(data_file) or preprocess:
             print "Creating pre-processed data from raw data"
             # Preprocess the data from the csv files of the datasets
             # Note that this data is processed in frames
@@ -83,7 +84,7 @@ class DataLoader(object):
         for subdir, dirs, files in os.walk(self.data_dir):
             for file in files:
                 # if dataset_index != leave_dataset and \
-                if dataset_index < leave_dataset and \
+                if dataset_index < self.leave_dataset and \
                     file == 'annotations_processed.csv':
 
                     # Define path of the csv file of the current dataset
@@ -184,19 +185,21 @@ class DataLoader(object):
         x_batch = []
         # Target data
         y_batch = []
+        # Dataset data
+        dval = []
         # Iteration index
         i = 0
         while i < self.batch_size:
             # Extract the frame data of the current dataset
-            frame_data = self.data[self.dataset_pointer]
+            current_data = self.data[self.dataset_pointer]
             # Get the frame pointer for the current dataset
             idx = self.frame_pointer
             # While there is still seq_length number of frames left in the current dataset
-            if idx + self.seq_length < frame_data.shape[0]:
+            if idx + self.seq_length < current_data.shape[0]:
                 # All the data in this sequence
-                seq_frame_data = frame_data[idx:idx+self.seq_length+1, :]
-                seq_source_frame_data = frame_data[idx:idx+self.seq_length, :]
-                seq_target_frame_data = frame_data[idx+1:idx+self.seq_length+1, :]
+                seq_frame_data = current_data[idx:idx+self.seq_length+1, :]
+                seq_source_frame_data = current_data[idx:idx+self.seq_length, :]
+                seq_target_frame_data = current_data[idx+1:idx+self.seq_length+1, :]
                 # Number of unique obj in this sequence of frames
                 obj_id_list = np.unique(seq_frame_data[:, :, 0])
                 num_unique_obj = obj_id_list.shape[0]
@@ -229,14 +232,14 @@ class DataLoader(object):
                 else:
                     self.frame_pointer += self.seq_length
 
-                d.append(self.dataset_pointer)
+                dval.append(self.dataset_pointer)
                 i += 1
             else:
                 # Not enough frames left
                 # Increment the dataset pointer and set the frame_pointer to zero
                 self.tick_batch_pointer()
 
-        return x_batch, y_batch, d
+        return x_batch, y_batch, dval
 
     def tick_batch_pointer(self):
         '''
