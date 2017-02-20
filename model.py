@@ -146,7 +146,6 @@ class DESIREModel(object):
             current_frame_data = frame  # MNP x 3 tensor
             current_target_frame_data = frame_target_data[seq] # MNP x 3 tensor
             for obj in xrange(0, self.args.max_num_obj):
-                print obj
                 obj_id = current_frame_data[obj, 0]
                 with tf.name_scope("extract_input_obj"):
                     spatial_input_x = tf.slice(current_frame_data, [obj, 1], [1, 2])
@@ -376,7 +375,7 @@ class DESIREModel(object):
         stddev = params[:, latent_size:]
         return [mean, stddev]
 
-    def tf_2d_normal(self, x, y, mux, muy, sx, sy, rho):
+    def tf_2d_normal(self, x_val, y_val, mux, muy, sx_val, sy_val, rho):
         '''
         Function that implements the PDF of a 2D normal distribution
         params:
@@ -391,18 +390,18 @@ class DESIREModel(object):
         # eq 3 in the paper
         # and eq 24 & 25 in Graves (2013)
         # Calculate (x - mux) and (y-muy)
-        normx = tf.sub(x, mux)
-        normy = tf.sub(y, muy)
-        # Calculate sx*sy
-        sxsy = tf.mul(sx, sy)
+        normx = tf.sub(x_val, mux)
+        normy = tf.sub(y_val, muy)
+        # Calculate sx_val*sy_val
+        sxsy = tf.mul(sx_val, sy_val)
         # Calculate the exponential factor
-        z = tf.square(tf.div(normx, sx)) + tf.square(tf.div(normy, sy)) \
+        z_val = tf.square(tf.div(normx, sx_val)) + tf.square(tf.div(normy, sy_val)) \
             - 2*tf.div(tf.mul(rho, tf.mul(normx, normy)), sxsy)
-        negRho = 1 - tf.square(rho)
+        neg_rho = 1 - tf.square(rho)
         # Numerator
-        result = tf.exp(tf.div(-z, 2*negRho))
+        result = tf.exp(tf.div(-z_val, 2*neg_rho))
         # Normalization constant
-        denom = 2 * np.pi * tf.mul(sxsy, tf.sqrt(negRho))
+        denom = 2 * np.pi * tf.mul(sxsy, tf.sqrt(neg_rho))
         # Final PDF calculation
         result = tf.div(result, denom)
         return result
@@ -437,9 +436,9 @@ class DESIREModel(object):
     def get_coef(self, output):
         '''eq 20 -> 22 of Graves (2013)'''
 
-        z = output
+        z_val = output
         # Split the output into 5 parts corresponding to means, std devs and corr
-        z_mux, z_muy, z_sx, z_sy, z_corr = tf.split(1, 5, z)
+        z_mux, z_muy, z_sx, z_sy, z_corr = tf.split(1, 5, z_val)
 
         # The output must be exponentiated for the std devs
         z_sx = tf.exp(z_sx)
@@ -477,7 +476,7 @@ class DESIREModel(object):
 
         return kld_loss
 
-    def sample_gaussian_2d(self, mux, muy, sx, sy, rho):
+    def sample_gaussian_2d(self, mux, muy, sx_val, sy_val, rho):
         '''
         Function to sample a point from a given 2D normal distribution
         params:
@@ -490,16 +489,19 @@ class DESIREModel(object):
         # Extract mean
         mean = [mux, muy]
         # Extract covariance matrix
-        cov = [[sx*sx, rho*sx*sy], [rho*sx*sy, sy*sy]]
+        cov = [[sx_val*sx_val, rho*sx_val*sy_val], [rho*sx_val*sy_val, sy_val*sy_val]]
         # Sample a point from the multivariate normal distribution
-        x = np.random.multivariate_normal(mean, cov, 1)
-        return x[0][0], x[0][1]
+        x_val = np.random.multivariate_normal(mean, cov, 1)
+        return x_val[0][0], x_val[0][1]
 
     def sample(self, sess, traj, grid, dimensions, true_traj, num=10):
-        # traj is a sequence of frames (of length obs_length)
-        # so traj shape is (obs_length x maxNumPeds x 3)
-        # grid is a tensor of shape obs_length x maxNumPeds x maxNumPeds x (gs**2)
+        '''
+        Sampling method
+        traj is a sequence of frames (of length obs_length)
+        so traj shape is (obs_length x maxNumPeds x 3)
+        grid is a tensor of shape obs_length x maxNumPeds x maxNumPeds x (gs**2)
         states = sess.run(self.gru_states)
+         '''
         # print "Fitting"
         # For each frame in the sequence
         for index, frame in enumerate(traj[:-1]):
@@ -522,8 +524,8 @@ class DESIREModel(object):
 
         prev_target_data = np.reshape(true_traj[traj.shape[0]], (1, self.max_num_obj, 3))
         # Prediction
-        for t in range(num):
-            print "**** NEW PREDICTION TIME STEP", t, "****"
+        for t_step in range(num):
+            print "**** NEW PREDICTION TIME STEP", t_step, "****"
             feed = {
                 self.input_data: prev_data,
                 self.gru_states: states,
@@ -539,10 +541,10 @@ class DESIREModel(object):
             newpos = np.zeros((1, self.max_num_obj, 3))
             for objindex, objoutput in enumerate(output):
                 [o_mux, o_muy, o_sx, o_sy, o_corr] = np.split(objoutput[0], 5, 0)
-                mux, muy, sx, sy, corr = \
+                mux, muy, sx_val, sy_val, corr = \
                     o_mux[0], o_muy[0], np.exp(o_sx[0]), np.exp(o_sy[0]), np.tanh(o_corr[0])
 
-                next_x, next_y = self.sample_gaussian_2d(mux, muy, sx, sy, corr)
+                next_x, next_y = self.sample_gaussian_2d(mux, muy, sx_val, sy_val, corr)
                 if next_x > 1.0:
                     next_x = 1.0
                 if next_y > 1.0:
@@ -550,7 +552,7 @@ class DESIREModel(object):
 
                 if prev_data[0, objindex, 0] != 0:
                     print "Pedestrian ID", prev_data[0, objindex, 0]
-                    print "Predicted parameters", mux, muy, sx, sy, corr
+                    print "Predicted parameters", mux, muy, sx_val, sy_val, corr
                     print "New Position", next_x, next_y
                     print "Target Position", prev_target_data[0, objindex, 1], \
                         prev_target_data[0, objindex, 2]
@@ -559,9 +561,9 @@ class DESIREModel(object):
                 newpos[0, objindex, :] = [prev_data[0, objindex, 0], next_x, next_y]
             ret = np.vstack((ret, newpos))
             prev_data = newpos
-            if t != num - 1:
+            if t_step != num - 1:
                 prev_target_data = \
-                    np.reshape(true_traj[traj.shape[0] + t + 1], (1, max_num_obj, 3))
+                    np.reshape(true_traj[traj.shape[0] + t_step + 1], (1, max_num_obj, 3))
 
         # The returned ret is of shape (obs_length+pred_length) x maxNumPeds x 3
         return ret
