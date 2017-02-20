@@ -188,7 +188,7 @@ class DESIREModel(object):
                     # Get the reconstructed mean from the decoder
                     x_reconstr_mean = \
                         self.vae_decoder(zval, self.vae_input_size)
-                    z_summary = tf.summary.histogram("zval", zval)
+                    # z_summary = tf.summary.histogram("zval", zval)
 
                 # fc layer
                 with tf.variable_scope("fc_softmax"):
