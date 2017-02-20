@@ -9,6 +9,7 @@ Date: 13th February 2017
 import copy
 import random
 import time
+import sys
 
 # from grid import getSequenceGridMask
 import ipdb
@@ -18,6 +19,7 @@ import tensorflow as tf
 from tensorflow.python.ops import rnn, rnn_cell, seq2seq
 from tensorflow.python.framework import dtypes
 
+sys.path.append("/home/s1045064/deep-learning/DESIRE")
 from convolutional_vae_util import deconv2d
 
 

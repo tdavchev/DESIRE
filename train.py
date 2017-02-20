@@ -9,12 +9,13 @@ import argparse
 import os
 import pickle
 import time
+import sys
 
 import ipdb
 import numpy as np
 import tensorflow as tf
 
-
+sys.path.append("/home/s1045064/deep-learning/DESIRE")
 from model import DESIREModel
 from utils import DataLoader
 # from grid import getSequenceGridMask
