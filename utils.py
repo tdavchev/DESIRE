@@ -53,6 +53,7 @@ class DataLoader(object):
         # If the file doesn't exist or forcePreProcess is true
         if not os.path.exists(data_file) or preprocess:
             print "Creating pre-processed data from raw data"
+            sys.stdout.flush()
             # Preprocess the data from the csv files of the datasets
             # Note that this data is processed in frames
             self.frame_preprocess(data_file)
@@ -171,6 +172,7 @@ class DataLoader(object):
             # get the frame data for the current dataset
             all_frame_data = self.data[dataset]
             print len(all_frame_data)
+            sys.stdout.flush()
             # Increment the counter with the number of sequences in the current dataset
             counter += int(len(all_frame_data) / (self.seq_length+2))
 

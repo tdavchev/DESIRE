@@ -528,6 +528,7 @@ class DESIREModel(object):
         # Prediction
         for t_step in range(num):
             print "**** NEW PREDICTION TIME STEP", t_step, "****"
+            sys.stdout.flush()
             feed = {
                 self.input_data: prev_data,
                 self.gru_states: states,
@@ -536,6 +537,7 @@ class DESIREModel(object):
             [output, states, cost] = sess.run(
                 [self.final_output, self.final_states, self.cost], feed)
             print "Cost", cost
+            sys.stdout.flush()
             # Output is a list of lists where the inner lists contain matrices of shape 1x5.
             # The outer list contains only one element (since seq_length=1) and the inner list
             # contains maxNumPeds elements
@@ -559,6 +561,7 @@ class DESIREModel(object):
                     print "Target Position", prev_target_data[0, objindex, 1], \
                         prev_target_data[0, objindex, 2]
                     print
+                    sys.stdout.flush()
 
                 newpos[0, objindex, :] = [prev_data[0, objindex, 0], next_x, next_y]
             ret = np.vstack((ret, newpos))
