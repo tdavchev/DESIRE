@@ -9,7 +9,10 @@ Date : 13th February 2017
 import os
 import pickle
 import random
+import sys
 import numpy as np
+
+sys.path.append("/home/s1045064/deep-learning/DESIRE")
 
 # The data loader class that loads data from the datasets considering
 # each frame as a datapoint and a sequence of consecutive frames as the
