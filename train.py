@@ -8,16 +8,17 @@ Date : 13th February 2017
 import argparse
 import os
 import pickle
-import time
 import sys
+import time
 
 import ipdb
 import numpy as np
 import tensorflow as tf
 
-sys.path.append("/home/s1045064/deep-learning/DESIRE")
 from model import DESIREModel
 from utils import DataLoader
+
+sys.path.append("/home/s1045064/deep-learning/DESIRE")
 # from grid import getSequenceGridMask
 
 
@@ -71,7 +72,7 @@ def main():
     parser.add_argument('--grid_size', type=int, default=4,
                         help='Grid size of the social grid')
     # Maximum number of pedestrians to be considered
-    parser.add_argument('--max_num_obj', type=int, default=100,
+    parser.add_argument('--max_num_obj', type=int, default=60,
                         help='Maximum Number of Moving objects')
     # The leave out dataset
     parser.add_argument('--leave_dataset', type=int, default=5,
@@ -176,7 +177,7 @@ def train(args):
                         model.target_data: y_batch
                         }
 
-                    train_loss, _ = sess.run([model.cost, model.optimizer], feed)
+                    train_loss = sess.run(model.cost, feed)
 
                     loss_batch += train_loss
 
