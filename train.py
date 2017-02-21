@@ -85,6 +85,8 @@ def main():
                         help='The encoder\'s output dimension')
     parser.add_argument('--d_dim', type=int, default=256,
                         help='The decoder\'s output dimension')
+    parser.add_argument('--strides', type=int, default=1,
+                        help='Stride size for the Temporal Convolution')
 
     args = parser.parse_args()
     train(args)
