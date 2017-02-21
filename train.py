@@ -15,7 +15,7 @@ import ipdb
 import numpy as np
 import tensorflow as tf
 
-sys.path.append("/home/s1045064/deep-learning/DESIRE-fewer-objects")
+sys.path.append("/home/s1045064/deep-learning/DESIRE")
 from model import DESIREModel
 from utils import DataLoader
 # from grid import getSequenceGridMask
@@ -93,8 +93,6 @@ def train(args):
     '''
     The actual train function
     '''
-    print "fewer objects"
-    sys.stdout.flush()
     # Create the DataLoader object
     data_loader = DataLoader(args.batch_size, args.seq_length,
                              args.max_num_obj, args.leave_dataset, preprocess=False)
