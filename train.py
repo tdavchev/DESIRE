@@ -155,7 +155,6 @@ def train(args):
                     #                                  args.neighborhood_size, args.grid_size)
                     x_batch = np.reshape(x_batch,
                                          [args.seq_length,
-                                          args.obs_length,
                                           args.max_num_obj,
                                           3])
 
@@ -168,7 +167,6 @@ def train(args):
 
                     y_batch = np.reshape(y_batch,
                                          [args.seq_length,
-                                          args.pred_length,
                                           args.max_num_obj,
                                           3])
 
@@ -178,7 +176,7 @@ def train(args):
                         model.target_data: y_batch
                         }
 
-                    train_loss, _ = sess.run(feed)
+                    train_loss, _ = sess.run([model.cost, model.optimizer], feed)
 
                     loss_batch += train_loss
 
