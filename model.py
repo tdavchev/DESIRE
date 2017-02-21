@@ -35,9 +35,12 @@ class DESIREModel(object):
         # input depth = sequence
         # input_height = max number of people
         # input width = id,x,y
-        self.temporal_kernel_size = 2
-        self.temporal_num_channels = 1
-        self.temporal_depth = 2
+        self.filter_height = 1
+        self.filter_width = self.args.seq_length
+        self.in_channels = 2 # one for x and y for each trajectory point
+        self.channel_multiplier = 100 # this is the feature map
+        # strides[0] = strides[3] for same horizontal and vertical strides
+        self.strides = [1, self.args.stride, self.args.stride, 1]
         self.input_size = 3
         self.rnn_size = args.rnn_size # hidden_features
         self.seq_length = args.seq_length # time_steps
@@ -72,26 +75,42 @@ class DESIREModel(object):
         '''
         # TODO: fix input size to be of size MNOx3 and convolve over the MNOx2D matrix
         # TODO: fix temporal_data to be of seqxMNOxinput sizeinstead
-        # self.temporal_data = tf.placeholder("float", [seq_length, input_size, 1])
-        self.input_data = tf.placeholder(tf.float32, \
-            [self.args.seq_length, self.args.max_num_obj, self.input_size], name="input_data")
-        self.target_data_enc = tf.placeholder("float", \
-            [self.seq_length, self.args.max_num_obj, self.input_size], name="target_data_enc")
-        self.target_data = tf.placeholder("float", \
-            [self.seq_length, self.args.max_num_obj, self.input_size], name="target_data")
-        self.learning_rate = \
-            tf.Variable(self.args.learning_rate, trainable=False, name="learning_rate")
+        self.temporal_data = tf.placeholder(
+            tf.float32,
+            shape=[1, args.max_num_obj, args.seq_length, 2],
+            name="temporal_data"
+        )
+        self.input_data = tf.placeholder(
+            tf.float32,
+            shape=[self.args.seq_length, self.args.max_num_obj, self.input_size],
+            name="input_data"
+        )
+        self.target_data_enc = tf.placeholder(
+            tf.float32,
+            shape=[self.seq_length, self.args.max_num_obj, self.input_size],
+            name="target_data_enc"
+        )
+        self.target_data = tf.placeholder(
+            tf.float32,
+            shape=[self.seq_length, self.args.max_num_obj, self.input_size],
+            name="target_data"
+        )
+        self.learning_rate = tf.Variable(
+            self.args.learning_rate,
+            trainable=False,
+            name="learning_rate"
+        )
         self.output_size = 5
 
         weights, biases = self.define_weights()
 
-        # # The Formula for the Model
-        # # Temporal convolution
-        # with tf.variable_scope("temporal_convolution"):
-        #     self.rho_i = tf.nn.relu(tf.add( \
-        #         tf.nn.depthwise_conv2d(
-        #             self.temporal_data, weights["temporal_w"], [1, 1, 1, 1], padding='VALID'),
-        #         biases["temporal_b"]))
+        # The Formula for the Model
+        # Temporal convolution
+        with tf.variable_scope("temporal_convolution"):
+            self.rho_i = tf.nn.relu(tf.add( \
+                tf.nn.depthwise_conv2d(
+                    self.temporal_data, weights["temporal_w"], self.strides, padding='VALID'),
+                biases["temporal_b"]))
 
         # Encoder
         with tf.variable_scope("gru_cell"):
@@ -311,10 +330,12 @@ class DESIREModel(object):
         # TODO:Make sure you learn the dimensionalities!!!!!
         weights, biases = {}, {}
         with tf.variable_scope("temporal_weights"):
-            weights["temporal_w"] = tf.Variable(tf.random_normal( \
-                [1, self.temporal_kernel_size, self.temporal_num_channels, self.temporal_depth]))
+            # This is the filter window
+            weights["temporal_w"] = tf.Variable(tf.truncated_normal( \
+                [self.filter_height, self.filter_width, self.in_channels, self.channel_multiplier],
+                stddev=0.1))
             biases["temporal_b"] = tf.Variable(tf.random_normal( \
-                [self.temporal_num_channels*self.temporal_depth]))
+                [self.in_channels*self.channel_multiplier]))
 
         with tf.variable_scope("hidden_enc_weights"):
             weights["w_hidden_enc1"] = tf.Variable(tf.random_normal( \
