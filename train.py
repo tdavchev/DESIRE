@@ -15,7 +15,7 @@ import ipdb
 import numpy as np
 import tensorflow as tf
 
-sys.path.append("/home/s1045064/deep-learning/DESIRE")
+sys.path.append("/home/s1045064/deep-learning/DESIRE-fewer-objects")
 from model import DESIREModel
 from utils import DataLoader
 # from grid import getSequenceGridMask
@@ -93,7 +93,8 @@ def train(args):
     '''
     The actual train function
     '''
-
+    print "fewer objects"
+    sys.stdout.flush()
     # Create the DataLoader object
     data_loader = DataLoader(args.batch_size, args.seq_length,
                              args.max_num_obj, args.leave_dataset, preprocess=False)
@@ -151,14 +152,6 @@ def train(args):
                     # extracted
                     x_batch, y_batch, d_batch = xval[batch], yval[batch], dval[batch]
 
-                    if d_batch == 0 and datasets[0] == 0:
-                        dataset_data = [640, 480]
-                    elif d_batch == 2 and datasets[2] == 2:
-                        dataset_data = [250, 600]
-                        # args.neighborhood_size = 3
-                    else:
-                        dataset_data = [720, 576]
-                        # args.neighborhood_size = temp_neighborhood_size
                     # need to split it by 8 x 4 ...
                     # grid_batch = getSequenceGridMask(x_batch, dataset_data,
                     #                                  args.neighborhood_size, args.grid_size)
