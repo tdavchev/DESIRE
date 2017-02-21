@@ -186,18 +186,18 @@ def train(args):
                 print(
                     "{}/{} (epoch {}), train_loss = {:.3f}, time/batch = {:.3f}"
                     .format(
-                        e * data_loader.num_batches + b,
+                        epoch * data_loader.num_batches + batch,
                         args.num_epochs * data_loader.num_batches,
-                        e,
+                        epoch,
                         loss_batch, end - start))
                 sys.stdout.flush()
 
                 # Save the model if the current epoch and batch number match the frequency
-                if (e * data_loader.num_batches + b) % args.save_every == 0 \
-                    and ((e * data_loader.num_batches + b) > 0):
+                if (epoch * data_loader.num_batches + batch) % args.save_every == 0 \
+                    and ((epoch * data_loader.num_batches + batch) > 0):
 
                     checkpoint_path = os.path.join('save', 'social_model.ckpt')
-                    saver.save(sess, checkpoint_path, global_step=e * data_loader.num_batches + b)
+                    saver.save(sess, checkpoint_path, global_step=e * data_loader.num_batches + batch)
                     print "model saved to {}".format(checkpoint_path)
                     sys.stdout.flush()
 
