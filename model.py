@@ -589,7 +589,7 @@ class DESIREModel(object):
             prev_data = newpos
             if t_step != num - 1:
                 prev_target_data = \
-                    np.reshape(true_traj[traj.shape[0] + t_step + 1], (1, max_num_obj, 3))
+                    np.reshape(true_traj[traj.shape[0] + t_step + 1], (1, self.max_num_obj, 3))
 
         # The returned ret is of shape (obs_length+pred_length) x maxNumPeds x 3
         return ret
