@@ -15,9 +15,8 @@ import ipdb
 import numpy as np
 import tensorflow as tf
 
-from model import DESIREModel
 execfile("utils/data_loader.py")
-
+execfile("model/model.py")
 
 # from grid import getSequenceGridMask
 
