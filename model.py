@@ -20,7 +20,8 @@ from tensorflow.python.ops import rnn, rnn_cell, seq2seq
 from tensorflow.python.framework import dtypes
 
 sys.path.append("/home/s1045064/deep-learning/DESIRE")
-from convolutional_vae_util import deconv2d
+execfile("utils/convolutional_vae_util.py")
+# from convolutional_vae_util import deconv2d
 
 
 class DESIREModel(object):
@@ -42,15 +43,15 @@ class DESIREModel(object):
         # strides[0] = strides[3] for same horizontal and vertical strides
         self.strides = [1, self.args.stride, self.args.stride, 1]
         self.input_size = 3
-        self.rnn_size = args.rnn_size # hidden_features
-        self.seq_length = args.seq_length # time_steps
+        self.rnn_size = self.args.rnn_size # hidden_features
+        self.seq_length = self.args.seq_length # time_steps
         self.encoder_output = 512
-        self.num_layers = args.num_layers
-        self.batch_size = args.batch_size
-        self.latent_size = args.latent_size
+        self.num_layers = self.args.num_layers
+        self.batch_size = self.args.batch_size
+        self.latent_size = self.args.latent_size
         self.input_shape = [int(np.sqrt(2*self.rnn_size)), int(np.sqrt(2*self.rnn_size))]
         self.vae_input_size = np.prod(self.input_shape)
-        self.max_num_obj = args.max_num_obj
+        self.max_num_obj = self.args.max_num_obj
 
         self.output_states = None
         self.input_data = None
@@ -77,7 +78,7 @@ class DESIREModel(object):
         # TODO: fix temporal_data to be of seqxMNOxinput sizeinstead
         self.temporal_data = tf.placeholder(
             tf.float32,
-            shape=[1, args.max_num_obj, args.seq_length, 2],
+            shape=[1, self.args.max_num_obj, self.args.seq_length, 2],
             name="temporal_data"
         )
         self.input_data = tf.placeholder(
@@ -528,8 +529,8 @@ class DESIREModel(object):
         # print "Fitting"
         # For each frame in the sequence
         for index, frame in enumerate(traj[:-1]):
-            data = np.reshape(frame, (1, self.max_num_obj, 3))
-            target_data = np.reshape(traj[index+1], (1, self.max_num_obj, 3))
+            data = np.reshape(frame, (1, self.args.max_num_obj, 3))
+            target_data = np.reshape(traj[index+1], (1, self.args.max_num_obj, 3))
 
             feed = {
                 self.input_data: data,
@@ -543,9 +544,9 @@ class DESIREModel(object):
 
         last_frame = traj[-1]
 
-        prev_data = np.reshape(last_frame, (1, self.max_num_obj, 3))
+        prev_data = np.reshape(last_frame, (1, self.args.max_num_obj, 3))
 
-        prev_target_data = np.reshape(true_traj[traj.shape[0]], (1, self.max_num_obj, 3))
+        prev_target_data = np.reshape(true_traj[traj.shape[0]], (1, self.args.max_num_obj, 3))
         # Prediction
         for t_step in range(num):
             print "**** NEW PREDICTION TIME STEP", t_step, "****"
@@ -563,7 +564,7 @@ class DESIREModel(object):
             # The outer list contains only one element (since seq_length=1) and the inner list
             # contains maxNumPeds elements
             # output = output[0]
-            newpos = np.zeros((1, self.max_num_obj, 3))
+            newpos = np.zeros((1, self.args.max_num_obj, 3))
             for objindex, objoutput in enumerate(output):
                 [o_mux, o_muy, o_sx, o_sy, o_corr] = np.split(objoutput[0], 5, 0)
                 mux, muy, sx_val, sy_val, corr = \
@@ -589,7 +590,7 @@ class DESIREModel(object):
             prev_data = newpos
             if t_step != num - 1:
                 prev_target_data = \
-                    np.reshape(true_traj[traj.shape[0] + t_step + 1], (1, max_num_obj, 3))
+                    np.reshape(true_traj[traj.shape[0] + t_step + 1], (1, self.args.max_num_obj, 3))
 
         # The returned ret is of shape (obs_length+pred_length) x maxNumPeds x 3
         return ret
