@@ -199,7 +199,11 @@ def train(args):
                     and ((epoch * data_loader.num_batches + batch) > 0):
 
                     checkpoint_path = os.path.join('save', 'social_model.ckpt')
-                    saver.save(sess, checkpoint_path, global_step=epoch * data_loader.num_batches + batch)
+                    saver.save(
+                        sess,
+                        checkpoint_path,
+                        global_step=epoch * data_loader.num_batches + batch
+                    )
                     print "model saved to {}".format(checkpoint_path)
                     sys.stdout.flush()
 
