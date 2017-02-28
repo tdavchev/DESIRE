@@ -80,24 +80,25 @@ class DESIREModel(object):
         '''
         # TODO: fix input size to be of size MNOx3 and convolve over the MNOx2D matrix
         # TODO: fix temporal_data to be of seqxMNOxinput sizeinstead
+        # shape=[1, self.args.max_num_obj, self.args.seq_length, 2],
         self.temporal_data = tf.placeholder(
             tf.float32,
-            shape=[1, self.args.max_num_obj, self.args.seq_length, 2],
+            shape=[1, self.args.max_num_obj, self.args.seq_length, self.input_size],
             name="temporal_data"
         )
         self.input_data = tf.placeholder(
             tf.float32,
-            shape=[self.args.seq_length, self.args.max_num_obj, self.input_size],
+            shape=[self.args.max_num_obj, self.args.seq_length, self.input_size],
             name="input_data"
         )
         self.target_data_enc = tf.placeholder(
             tf.float32,
-            shape=[self.seq_length, self.args.max_num_obj, self.input_size],
+            shape=[self.args.max_num_obj, self.seq_length, self.input_size],
             name="target_data_enc"
         )
         self.target_data = tf.placeholder(
             tf.float32,
-            shape=[self.seq_length, self.args.max_num_obj, self.input_size],
+            shape=[self.args.max_num_obj, self.seq_length, self.input_size],
             name="target_data"
         )
         self.learning_rate = tf.Variable(
@@ -105,52 +106,79 @@ class DESIREModel(object):
             trainable=False,
             name="learning_rate"
         )
-        self.output_size = 5
+
+        self.output_size = self.seq_length * 2
 
         weights, biases = self.define_weights()
 
+        temporal_shape = self.temporal_data.get_shape().as_list()
+        temporal_shape[3] = temporal_shape[3] - 1
+        temporal_input = tf.slice(
+            self.temporal_data,
+            [0, 0, 0, 0],
+            temporal_shape
+        )
+        temporal_ids = self.temporal_data[:, :, :, 2:]
         # The Formula for the Model
         # Temporal convolution
         with tf.variable_scope("temporal_convolution"):
             self.rho_i = tf.nn.relu(tf.add( \
                 tf.nn.depthwise_conv2d(
-                    self.temporal_data, weights["temporal_w"], self.strides, padding='VALID'),
+                    temporal_input, weights["temporal_w"],
+                    self.strides,
+                    padding='VALID'
+                ),
                 biases["temporal_b"]))
 
         # Encoder
         with tf.variable_scope("gru_cell"):
-            lstm_cell = tf.nn.rnn_cell.GRUCell(self.rnn_size)
-            cells = tf.nn.rnn_cell.MultiRNNCell([lstm_cell]*self.num_layers, state_is_tuple=False)
+            gru_cell = tf.nn.rnn_cell.GRUCell(self.decoder_output)
+            cells = tf.nn.rnn_cell.MultiRNNCell(
+                [gru_cell]*self.num_layers,
+                state_is_tuple=False
+            )
 
         with tf.variable_scope("gru_y_cell"):
-            lstm_cell_y = tf.nn.rnn_cell.GRUCell(self.rnn_size)
-            cells_y = tf.nn.rnn_cell.MultiRNNCell([lstm_cell]*self.num_layers, state_is_tuple=False)
+            gru_cell_y = tf.nn.rnn_cell.GRUCell(self.decoder_output)
+            cells_y = tf.nn.rnn_cell.MultiRNNCell(
+                [gru_cell_y]*self.num_layers,
+                state_is_tuple=False
+            )
 
-        # Define LSTM states for each pedestrian
+        # Define GRU states for each pedestrian
         with tf.variable_scope("gru_states"):
-            self.gru_states = tf.zeros([self.args.max_num_obj, cells.state_size], name="gru_states")
-            self.enc_state_x = tf.split(0, self.args.max_num_obj, self.gru_states)
+            self.gru_states = tf.zeros(
+                [self.args.max_num_obj, cells.state_size],
+                name="gru_states"
+            )
+            self.enc_state_x = tf.split(
+                0, self.args.max_num_obj, self.gru_states
+            )
 
         with tf.variable_scope("gru_states_y"):
-            self.gru_states_y = \
-                tf.zeros([self.args.max_num_obj, cells_y.state_size], name="gru_states_y")
-            self.enc_state_y = tf.split(0, self.args.max_num_obj, self.gru_states_y)
+            self.gru_states_y = tf.zeros(
+                [self.args.max_num_obj, cells_y.state_size],
+                name="gru_states_y"
+            )
+            self.enc_state_y = tf.split(
+                0, self.args.max_num_obj, self.gru_states_y
+            )
 
         # Define hidden output states for each pedestrian
         with tf.variable_scope("output_states"):
             self.output_states = \
                 tf.split(0, self.args.max_num_obj, \
-                    tf.zeros([self.args.max_num_obj, cells.output_size]))
+                    tf.zeros([self.args.max_num_obj, 7, cells.output_size]))
 
         # List of tensors each of shape args.maxNumPedsx3 corresponding to
         # each frame in the sequence
         with tf.name_scope("frame_data_tensors"):
             frame_data = [tf.squeeze(input_, [0]) \
-                for input_ in tf.split(0, self.args.seq_length, self.input_data)]
+                for input_ in tf.split(0, self.args.max_num_obj, self.input_data)]
 
         with tf.name_scope("frame_target_data_tensors"):
             frame_target_data = [tf.squeeze(target_, [0]) \
-                for target_ in tf.split(0, self.args.seq_length, self.target_data)]
+                for target_ in tf.split(0, self.args.max_num_obj, self.target_data)]
 
         # Cost
         with tf.name_scope("Cost_related_stuff"):
@@ -168,120 +196,155 @@ class DESIREModel(object):
         with tf.name_scope("Non_existent_obj_stuff"):
             nonexistent_obj = tf.constant(0.0, name="zero_obj")
 
-        for seq, frame in enumerate(frame_data):
-            current_frame_data = frame  # MNP x 3 tensor
-            current_target_frame_data = frame_target_data[seq] # MNP x 3 tensor
-            for obj in xrange(0, self.args.max_num_obj):
-                obj_id = current_frame_data[obj, 0]
-                with tf.name_scope("extract_input_obj"):
-                    spatial_input_x = tf.slice(current_frame_data, [obj, 1], [1, 2])
-                    spatial_input_y = tf.slice(current_target_frame_data, [obj, 1], [1, 2])
+        # for seq, frame in enumerate(frame_data):
+        #     current_frame_data = frame  # MNP x 3 tensor
+        #     current_target_frame_data = frame_target_data[seq] # MNP x 3 tensor
+        for obj in xrange(0, self.args.max_num_obj):
+            # does this assume that every next sequence will depend on the previous ?
+            # not sure since it will only produce K and then choose 1 out of them
+            obj_id = frame_data[obj][0][0]
+            with tf.name_scope("extract_input_obj"):
+                spatial_input_x = tf.split(
+                    0, self.seq_length,
+                    tf.squeeze(tf.slice(
+                        frame_data,
+                        [obj, 0, 1],
+                        [1, self.seq_length, 2]
+                    ), [0])
+                )
+                spatial_input_y = tf.split(
+                    0, self.seq_length,
+                    tf.squeeze(tf.slice(
+                        frame_target_data,
+                        [obj, 0, 1],
+                        [1, self.seq_length, 2]
+                    ), [0])
+                )
 
-                with tf.variable_scope("encoding_operations_x", \
-                            reuse=True if obj > 0 or seq > 0 else None):
-                    _, self.enc_state_x[obj] = \
-                        rnn.rnn(cells, [spatial_input_x], dtype=dtypes.float32)
+            with tf.variable_scope("encoding_operations_x", \
+                        reuse=True if obj > 0 else None):
+                _, self.enc_state_x[obj] = \
+                    rnn.rnn(cells, spatial_input_x, dtype=dtypes.float32)
 
-                with tf.variable_scope("encoding_operations_y", \
-                            reuse=True if obj > 0 or seq > 0 else None):
-                    _, self.enc_state_y[obj] = \
-                        rnn.rnn(cells_y, [spatial_input_y], dtype=dtypes.float32)
+            with tf.variable_scope("encoding_operations_y", \
+                        reuse=True if obj > 0 else None):
+                _, self.enc_state_y[obj] = \
+                    rnn.rnn(cells_y, spatial_input_y, dtype=dtypes.float32)
 
-                with tf.name_scope("concatenate_embeddings"):
-                    # Concatenate the summaries c1 and c2
-                    complete_input = tf.concat(1, [self.enc_state_x[obj], self.enc_state_y[obj]])
+            with tf.name_scope("concatenate_embeddings"):
+                # Concatenate the summaries c1 and c2
+                complete_input = tf.concat(1, [self.enc_state_x[obj], self.enc_state_y[obj]])
 
-                # fc layer
-                with tf.variable_scope("fc_c"):
-                    vae_inputs = tf.nn.relu( \
-                        tf.nn.xw_plus_b( \
-                            complete_input, weights["w_hidden_enc1"], biases["b_hidden_enc1"]))
+            # fc layer
+            with tf.variable_scope("fc_c"):
+                vae_inputs = tf.nn.relu( \
+                    tf.nn.xw_plus_b( \
+                        complete_input, weights["w_hidden_enc1"], biases["b_hidden_enc1"]))
 
-                # Convolutional VAE
-                # z = mu + sigma * epsilon
-                # epsilon is a sample from a N(0, 1) distribution
-                # Encode our data into z and return the mean and covariance
-                with tf.variable_scope("zval", reuse=True if obj > 0 or seq > 0 else None):
-                    z_mean, z_log_sigma_sq = \
-                        self.vae_encoder(vae_inputs, self.latent_size)
-                    eps_batch = z_log_sigma_sq.get_shape().as_list()[0] \
-                        if z_log_sigma_sq.get_shape().as_list()[0] is not None else self.batch_size
-                    eps = tf.random_normal(
-                        [eps_batch, self.latent_size], 0.0, 1.0, dtype=tf.float32)
-                    zval = tf.add(z_mean, tf.mul(tf.sqrt(tf.exp(z_log_sigma_sq)), eps))
-                    # Get the reconstructed mean from the decoder
-                    x_reconstr_mean = \
-                        self.vae_decoder(zval, self.vae_input_size)
-                    # z_summary = tf.summary.histogram("zval", zval)
+            # Convolutional VAE
+            # z = mu + sigma * epsilon
+            # epsilon is a sample from a N(0, 1) distribution
+            # Encode our data into z and return the mean and covariance
+            with tf.variable_scope("zval", reuse=True if obj > 0 else None):
+                z_mean, z_log_sigma_sq = \
+                    self.vae_encoder(vae_inputs, self.latent_size)
+                eps_batch = z_log_sigma_sq.get_shape().as_list()[0] \
+                    if z_log_sigma_sq.get_shape().as_list()[0] is not None else self.batch_size
+                eps = tf.random_normal(
+                    [eps_batch, self.latent_size], 0.0, 1.0, dtype=tf.float32)
+                zval = tf.add(z_mean, tf.mul(tf.sqrt(tf.exp(z_log_sigma_sq)), eps))
+                # Get the reconstructed mean from the decoder
+                x_reconstr_mean = \
+                    self.vae_decoder(zval, self.vae_input_size)
+                # z_summary = tf.summary.histogram("zval", zval)
 
-                # fc layer
-                with tf.variable_scope("fc_softmax"):
-                    multipl = tf.add(
-                        tf.matmul(x_reconstr_mean, weights["w_post_vae"]),
-                        biases["b_post_vae"])
-                    multipl = tf.nn.relu(multipl)
-                    multipl = tf.nn.softmax(multipl)
+            # fc layer
+            with tf.variable_scope("fc_softmax"):
+                multipl = tf.add(
+                    tf.matmul(x_reconstr_mean, weights["w_post_vae"]),
+                    biases["b_post_vae"])
+                multipl = tf.nn.relu(multipl)
+                multipl = tf.nn.softmax(multipl)
 
-                # Decoder 1
-                with tf.variable_scope("hidden_states", reuse=True if obj > 0 or seq > 0 else None):
-                    hidden_state_x = tf.mul(multipl, self.enc_state_x[obj])
-                    self.output_states[obj], self.enc_state_x[obj] = \
-                        seq2seq.rnn_decoder(
-                            [hidden_state_x],
-                            self.enc_state_x[obj],
-                            cells)
-                    self.output_states[obj] = tf.squeeze(self.output_states[obj], [0])
+            # Decoder 1
+            with tf.variable_scope("hidden_states", reuse=True if obj > 0 else None):
+                hidden_state_x = [tf.mul(multipl, self.enc_state_x[obj]) for i in xrange(7)]
+                self.output_states[obj], self.enc_state_x[obj] = \
+                    seq2seq.rnn_decoder(
+                        hidden_state_x,
+                        self.enc_state_x[obj],
+                        cells)
+                self.output_states[obj] = [
+                    tf.split(
+                        0, self.seq_length, tf.squeeze(_item, [0])
+                    ) for _item in self.output_states[obj]]
 
-                # Apply the linear layer. Output would be a tensor of shape 1 x output_size
-                with tf.name_scope("output_linear_layer"):
-                    self.initial_output[obj] = \
-                        tf.nn.xw_plus_b(
-                            self.output_states[obj],
-                            weights["output_w"],
-                            biases["output_b"])
+            for prediction_k in xrange(output_states[obj]):
+                aa_e = []
+                bb_e = []
+                for step_t in xrange(prediction_k):
+                    aa_e.append(self.output_states[obj][prediction_k][step_t][0]*zz[obj][:100])
+                    bb_e.append(self.output_states[obj][prediction_k][step_t][1]*zz[obj][100:])
 
-                with tf.name_scope("extract_target_obj"):
-                    # Extract x and y coordinates of the target data
-                    # x_data and y_data would be tensors of shape 1 x 1
-                    [x_data, y_data] = \
-                        tf.split(1, 2, tf.slice(current_target_frame_data, [obj, 1], [1, 2]))
-                    target_obj_id = current_target_frame_data[obj, 0]
+            # FROM HERE ON WE NEED TO IMPROVE !!!
+            # RANKING AND REFINING SHOULD GO BEFORE WHAT FOLLOWS HERE !!!
 
-                with tf.name_scope("get_coef"):
-                    # Extract coef from output of the linear output layer
-                    [o_mux, o_muy, o_sx, o_sy, o_corr] = self.get_coef(self.initial_output[obj])
+            # Apply the linear layer. Output would be a tensor of shape 1 x output_size
+            with tf.name_scope("output_linear_layer"):
+                self.initial_output[obj] = \
+                    tf.nn.xw_plus_b(
+                        self.output_states[obj],
+                        weights["output_w"],
+                        biases["output_b"])
 
-                # TODO: check if KLD loss actually has reconstruction loss in it
-                # TODO: make sure that the CVAE implementation is truly from the same paper
-                # TODO: Figure out how/if necessary to divide by K the reconstr_loss
-                with tf.name_scope("calculate_loss"):
-                    # Calculate loss for the current ped
-                    reconstr_loss = \
-                        self.get_reconstr_loss(o_mux, o_muy, o_sx, o_sy, o_corr, x_data, y_data)
-                    kld_loss = self.kld_loss(
-                        vae_inputs,
-                        x_reconstr_mean,
-                        z_log_sigma_sq,
-                        z_mean
-                    )
-                    loss = tf.reduce_mean(reconstr_loss+kld_loss)
+            with tf.name_scope("extract_target_obj"):
+                # Extract x and y coordinates of the target data
+                # x_data and y_data would be tensors of shape 1 x 1
+                [x_data, y_data] = \
+                    tf.split(1, 2, tf.slice(current_target_frame_data, [obj, 1], [1, 2]))
+                target_obj_id = current_target_frame_data[obj, 0]
 
-                with tf.name_scope("increment_cost"):
-                    # If it is a non-existent object, it should not contribute to cost
-                    # If the object doesn't exist in the next frame, he/she/it should not
-                    # contribute to cost as well
-                    self.cost = tf.select( \
-                        tf.logical_or( \
-                            tf.equal(obj_id, nonexistent_obj), \
-                            tf.equal(target_obj_id, nonexistent_obj)), \
-                        self.cost, \
-                        tf.add(self.cost, loss))
-                    self.counter = tf.select( \
-                        tf.logical_or( \
-                            tf.equal(obj_id, nonexistent_obj), \
-                            tf.equal(target_obj_id, nonexistent_obj)), \
-                        self.counter, \
-                        tf.add(self.counter, self.increment))
+            with tf.name_scope("get_coef"):
+                # Extract coef from output of the linear output layer
+                [o_mux, o_muy, o_sx, o_sy, o_corr] = self.get_coef(self.initial_output[obj])
+
+            # TODO: check if KLD loss actually has reconstruction loss in it
+            # TODO: make sure that the CVAE implementation is truly from the same paper
+            # TODO: Figure out how/if necessary to divide by K the reconstr_loss
+            with tf.name_scope("calculate_loss"):
+                # Calculate loss for the current ped
+                reconstr_loss = \
+                    self.get_reconstr_loss(o_mux, o_muy, o_sx, o_sy, o_corr, x_data, y_data)
+                kld_loss = self.kld_loss(
+                    vae_inputs,
+                    x_reconstr_mean,
+                    z_log_sigma_sq,
+                    z_mean
+                )
+                loss = tf.reduce_mean(reconstr_loss+kld_loss)
+
+            with tf.name_scope("increment_cost"):
+                # If it is a non-existent object, it should not contribute to cost
+                # If the object doesn't exist in the next frame, he/she/it should not
+                # contribute to cost as well
+                self.cost = tf.select( \
+                    tf.logical_or( \
+                        tf.equal(obj_id, nonexistent_obj), \
+                        tf.equal(target_obj_id, nonexistent_obj)), \
+                    self.cost, \
+                    tf.add(self.cost, loss))
+                self.counter = tf.select( \
+                    tf.logical_or( \
+                        tf.equal(obj_id, nonexistent_obj), \
+                        tf.equal(target_obj_id, nonexistent_obj)), \
+                    self.counter, \
+                    tf.add(self.counter, self.increment))
+
+        for sequence in xrange(7):
+            [o_mux, o_muy, o_sx, o_sy, o_corr] = np.split(self.initial_output[0], 5, 0)
+            mux, muy, sx_val, sy_val, corr = \
+                    o_mux[0], o_muy[0], np.exp(o_sx[0]), np.exp(o_sy[0]), np.tanh(o_corr[0])
+            next_x, next_y = self.sample_gaussian_2d(mux, muy, sx_val, sy_val, corr)
 
         with tf.name_scope("mean_cost"):
             # Mean of the cost
