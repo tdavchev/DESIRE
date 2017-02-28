@@ -289,28 +289,30 @@ class DESIREModel(object):
             # FROM HERE ON WE NEED TO IMPROVE !!!
             # RANKING AND REFINING SHOULD GO BEFORE WHAT FOLLOWS HERE !!!
 
-            # Apply the linear layer. Output would be a tensor of shape 1 x output_size
-            with tf.name_scope("output_linear_layer"):
-                self.initial_output[obj] = \
-                    tf.nn.xw_plus_b(
-                        self.output_states[obj],
-                        weights["output_w"],
-                        biases["output_b"])
+            # # Apply the linear layer. Output would be a tensor of shape 1 x output_size
+            # with tf.name_scope("output_linear_layer"):
+            #     self.initial_output[obj] = \
+            #         tf.nn.xw_plus_b(
+            #             self.output_states[obj],
+            #             weights["output_w"],
+            #             biases["output_b"])
 
-            with tf.name_scope("extract_target_obj"):
-                # Extract x and y coordinates of the target data
-                # x_data and y_data would be tensors of shape 1 x 1
-                [x_data, y_data] = \
-                    tf.split(1, 2, tf.slice(current_target_frame_data, [obj, 1], [1, 2]))
-                target_obj_id = current_target_frame_data[obj, 0]
+            # with tf.name_scope("extract_target_obj"):
+            #     # Extract x and y coordinates of the target data
+            #     # x_data and y_data would be tensors of shape 1 x 1
+            #     [x_data, y_data] = \
+            #         tf.split(1, 2, tf.slice(current_target_frame_data, [obj, 1], [1, 2]))
+            #     target_obj_id = current_target_frame_data[obj, 0]
 
-            with tf.name_scope("get_coef"):
-                # Extract coef from output of the linear output layer
-                [o_mux, o_muy, o_sx, o_sy, o_corr] = self.get_coef(self.initial_output[obj])
+            # with tf.name_scope("get_coef"):
+            #     # Extract coef from output of the linear output layer
+            #     [o_mux, o_muy, o_sx, o_sy, o_corr] = self.get_coef(self.initial_output[obj])
 
             # TODO: check if KLD loss actually has reconstruction loss in it
             # TODO: make sure that the CVAE implementation is truly from the same paper
             # TODO: Figure out how/if necessary to divide by K the reconstr_loss
+            # TODO: The reconstr loss does not sample from a distribution anymore but instead
+            #       chooses the most probable trajectory from the IOC (verify)
             with tf.name_scope("calculate_loss"):
                 # Calculate loss for the current ped
                 reconstr_loss = \
