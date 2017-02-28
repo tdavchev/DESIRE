@@ -82,7 +82,7 @@ def main():
     # The CVAE encoder's dimension
     parser.add_argument('--e_dim', type=int, default=256,
                         help='The encoder\'s output dimension')
-    parser.add_argument('--d_dim', type=int, default=256,
+    parser.add_argument('--d_dim', type=int, default=16,
                         help='The decoder\'s output dimension')
     parser.add_argument('--stride', type=int, default=1,
                         help='Stride size for the Temporal Convolution')
