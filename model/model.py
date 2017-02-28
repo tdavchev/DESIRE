@@ -45,13 +45,15 @@ class DESIREModel(object):
         # strides[0] = strides[3] for same horizontal and vertical strides
         self.strides = [1, self.args.stride, self.args.stride, 1]
         self.input_size = 3
+        self.encoder_output = self.args.e_dim
+        self.decoder_output = self.args.d_dim # hidden_features
         self.rnn_size = self.args.rnn_size # hidden_features
         self.seq_length = self.args.seq_length # time_steps
-        self.encoder_output = 512
         self.num_layers = self.args.num_layers
         self.batch_size = self.args.batch_size
         self.latent_size = self.args.latent_size
-        self.input_shape = [int(np.sqrt(2*self.rnn_size)), int(np.sqrt(2*self.rnn_size))]
+        self.input_shape = [int(np.sqrt(2*self.rnn_size)),
+                            int(np.sqrt(2*self.rnn_size))]
         self.vae_input_size = np.prod(self.input_shape)
         self.max_num_obj = self.args.max_num_obj
 
