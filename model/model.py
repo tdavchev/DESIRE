@@ -33,6 +33,8 @@ class DESIREModel(object):
 
     def __init__(self, args):
         self.args = args
+        # TODO: remove the unnecesary variables
+        # TODO: rename decoder_output to hidden_features
         # input depth = sequence
         # input_height = max number of people
         # input width = id,x,y
