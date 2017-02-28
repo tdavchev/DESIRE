@@ -407,21 +407,21 @@ class DESIREModel(object):
 
         with tf.variable_scope("hidden_enc_weights"):
             weights["w_hidden_enc1"] = tf.Variable(tf.random_normal( \
-                [self.vae_input_size, self.vae_input_size]))
+                [2*self.decoder_output, self.vae_input_size]))
             biases["b_hidden_enc1"] = tf.Variable(tf.random_normal( \
                 [self.vae_input_size]))
 
         with tf.variable_scope("post_vae_weights"):
             weights["w_post_vae"] = tf.Variable(tf.random_normal( \
-                [self.vae_input_size, self.rnn_size]))
+                [self.vae_input_size, self.decoder_output]))
             biases["b_post_vae"] = tf.Variable(tf.random_normal( \
-                [self.rnn_size]))
+                [self.decoder_output]))
 
-        with tf.variable_scope("output_weights"):
-            weights["output_w"] = tf.Variable(tf.random_normal( \
-                [self.rnn_size, self.output_size]))
-            biases["output_b"] = tf.Variable(tf.random_normal( \
-                [self.output_size]))
+        # with tf.variable_scope("output_weights"):
+        #     weights["output_w"] = tf.Variable(tf.random_normal( \
+        #         [self.rnn_size, self.output_size]))
+        #     biases["output_b"] = tf.Variable(tf.random_normal( \
+        #         [self.output_size]))
 
         return weights, biases
 
