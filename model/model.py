@@ -164,6 +164,13 @@ class DESIREModel(object):
                 0, self.args.max_num_obj, self.gru_states_y
             )
 
+        with tf.variable_scope("feature_pooling"):
+            self.f_pool = \
+                tf.zeros([self.args.max_num_obj, 7, self.seq_length, 2*self.channel_multiplier])
+            self.feature_pooling = \
+                tf.split(0, self.args.max_num_obj, self.f_pool)
+            self.feature_pooling = [tf.squeeze(_input, [0]) for _input in self.feature_pooling]
+
         # Define hidden output states for each pedestrian
         with tf.variable_scope("output_states"):
             self.output_states = \
@@ -279,13 +286,27 @@ class DESIREModel(object):
                         0, self.seq_length, tf.squeeze(_item, [0])
                     ) for _item in self.output_states[obj]]
 
-            for prediction_k in xrange(output_states[obj]):
-                aa_e = []
-                bb_e = []
-                for step_t in xrange(prediction_k):
-                    aa_e.append(self.output_states[obj][prediction_k][step_t][0]*zz[obj][:100])
-                    bb_e.append(self.output_states[obj][prediction_k][step_t][1]*zz[obj][100:])
+            rho_i = tf.squeeze(self.rho_i, [0])
+            rho_i = tf.squeeze(rho_i, [1])
+            pooling_list = []
+            for prediction_k in xrange(len(self.output_states[obj])):
+                pooling_list.append([])
+                for step_t in xrange(len(self.output_states[obj][prediction_k])):
+                    pooling_list[prediction_k].append(
+                        tf.concat(
+                            0, [tf.multiply
+                                (
+                                    self.output_states[obj][prediction_k][step_t][0],
+                                    rho_i[obj][:100]
+                                ),
+                                tf.multiply
+                                (
+                                    self.output_states[obj][prediction_k][step_t][1],
+                                    rho_i[obj][100:]
+                                )]
+                            ))
 
+            self.feature_pooling[obj] = tf.pack(pooling_list)
             # FROM HERE ON WE NEED TO IMPROVE !!!
             # RANKING AND REFINING SHOULD GO BEFORE WHAT FOLLOWS HERE !!!
 
