@@ -202,16 +202,11 @@ class DESIREModel(object):
                 tf.split(0, self.args.max_num_obj, self.f_pool)
             self.feature_pooling = [tf.squeeze(_input, [0]) for _input in self.feature_pooling]
 
-        # Define hidden output states for each pedestrian ??
+        # Define hidden output states for each pedestrian
         with tf.variable_scope("output_states"):
             self.output_states = \
                 tf.split(0, self.args.max_num_obj, \
-                    tf.zeros([
-                        self.args.max_num_obj,
-                        self.k_traj,
-                        self.seq_length,
-                        cells.output_size
-                    ]))
+                    tf.zeros([self.args.max_num_obj, 7, cells.output_size]))
 
         # List of tensors each of shape args.maxNumPedsx3 corresponding to
         # each frame in the sequence
@@ -250,164 +245,97 @@ class DESIREModel(object):
         #         for input_ in tf.split(0, self.seq_length, self.grid_data)]
 
         for obj in xrange(0, self.args.max_num_obj):
-            obj_id = temporal_ids[obj][0][0]
+            # does this assume that every next sequence will depend on the previous ?
+            # not sure since it will only produce K and then choose 1 out of them
+            obj_id = temporal_ids[obj][0][0]#frame_data[obj][0][0]
             pooling_list = []
-            # with tf.name_scope("extract_input_obj"):
-            #     spatial_input_x = tf.split(
-            #         0, self.seq_length,
-            #         frame_data[obj]
-            #     )
-            #     spatial_input_y = tf.split(
-            #         0, 2*self.seq_length,
-            #         frame_data_y[obj]
-            #     )
+            with tf.name_scope("extract_input_obj"):
+                spatial_input_x = tf.split(
+                    0, self.seq_length,
+                    frame_data[0]
+                    # tf.squeeze(tf.slice(
+                    #     frame_data,
+                    #     [obj, 0, 1],
+                    #     [1, self.seq_length, 2]
+                    # ), [0])
+                )
+                spatial_input_y = tf.split(
+                    0, 2*self.seq_length,
+                    frame_data_y[0]
+                    # tf.squeeze(tf.slice(
+                    #     frame_target_data,
+                    #     [obj, 0, 1],
+                    #     [1, self.seq_length, 2]
+                    # ), [0])
+                )
 
-            # with tf.variable_scope("encoding_operations_x", \
-            #             reuse=True if obj > 0 else None):
-            #     _, self.enc_state_x[obj] = \
-            #         rnn.rnn(cells, spatial_input_x, dtype=dtypes.float32)
-
-            # with tf.variable_scope("encoding_operations_y", \
-            #             reuse=True if obj > 0 else None):
-            #     _, self.enc_state_y[obj] = \
-            #         rnn.rnn(cells_y, spatial_input_y, dtype=dtypes.float32)
-
-            # This seems wrong ... although [7] does encoding and decoding per t
-            # here y is 40 and x is 20 ... when concatenated only take the first 20 vlaues of y ?
-            # then what's the point of the rest 20 ?!
             with tf.variable_scope("encoding_operations_x", \
                         reuse=True if obj > 0 else None):
                 _, self.enc_state_x[obj] = \
-                    rnn.rnn(cells, [frame_data[obj]], dtype=dtypes.float32)
-                self.h_of_x[obj] = tf.split(
-                    0, self.seq_length, self.enc_state_x[obj]
-                )
-                # Should this be here, before encoding or non-existent at all ?
-                # use tf.pad instead !
-                zero_pad = tf.zeros([self.seq_length, 1, self.rnn_size])
-                self.h_of_x[obj] = tf.concat(
-                    0,
-                    [self.h_of_x[obj], zero_pad]
-                )
-                self.h_of_x[obj] = tf.split(
-                    0, 2*self.seq_length, tf.squeeze(self.h_of_x[obj], [1])
-                )
+                    rnn.rnn(cells, spatial_input_x, dtype=dtypes.float32)
 
             with tf.variable_scope("encoding_operations_y", \
                         reuse=True if obj > 0 else None):
                 _, self.enc_state_y[obj] = \
-                    rnn.rnn(cells_y, [frame_data_y[obj]], dtype=dtypes.float32)
-                self.enc_state_y[obj] = tf.split(
-                    0, 2*self.seq_length, self.enc_state_y[obj]
-                )
+                    rnn.rnn(cells_y, spatial_input_y, dtype=dtypes.float32)
 
             with tf.name_scope("concatenate_embeddings"):
                 # Concatenate the summaries c1 and c2
-                complete_input = tf.concat(
-                    2,
-                    [self.h_of_x[obj], self.enc_state_y[obj]]
-                )
-                # complete_input = tf.concat(1, [self.enc_state_x[obj], self.enc_state_y[obj]])
+                complete_input = tf.concat(1, [self.enc_state_x[obj], self.enc_state_y[obj]])
 
             # Convolutional VAE
             # fc layer
             with tf.variable_scope("fc_c"):
-                vae_inputs = [
-                    tf.nn.relu( \
-                        tf.nn.xw_plus_b( \
-                            complete_input[i], weights["w_hidden_enc1"], biases["b_hidden_enc1"]))
-                    for i in xrange(2*self.seq_length)
-                ]
+                vae_inputs = tf.nn.relu( \
+                    tf.nn.xw_plus_b( \
+                        complete_input, weights["w_hidden_enc1"], biases["b_hidden_enc1"]))
 
             # Encode our data into z and return the mean and covariance
             # =============================== Q(z|X) ======================================
             with tf.variable_scope("recognition", reuse=True if obj > 0 else None):
-                z_mu = [
-                    tf.nn.xw_plus_b(vae_inputs[i], weights["w_mu"], biases["b_mu"])
-                    for i in xrange(2*self.seq_length)
-                ]
-                z_logvar = [
-                    tf.nn.xw_plus_b(vae_inputs[i], weights["w_sigma"], biases["b_sigma"])
-                    for i in xrange(2*self.seq_length)
-                ]
-                eps = [
-                    [
-                        tf.random_normal(shape=tf.shape(z_mu[y]))
-                        for y in xrange(2*self.seq_length)
-                    ]
-                    for i in xrange(self.k_traj)
-                ]
-                z_sample = [
-                    [
-                        z_mu[y] + tf.exp(z_logvar[y] / 2) * eps[i][y]
-                        for y in xrange(2*self.seq_length)
-                    ]
-                    for i in xrange(self.k_traj)
-                ]
+                z_mu = tf.nn.xw_plus_b(vae_inputs, weights["w_mu"], biases["b_mu"])
+                z_logvar = tf.nn.xw_plus_b(vae_inputs, weights["w_sigma"], biases["b_sigma"])
+                eps = [tf.random_normal(shape=tf.shape(z_mu)) for i in xrange(self.k_traj)]
+                z_sample = [z_mu + tf.exp(z_logvar / 2) * eps[i] for i in xrange(self.k_traj)]
 
             # =============================== P(X|z) ======================================
             with tf.variable_scope("generation", reuse=True if obj > 0 else None):
-                inputs = [
-                    tf.concat(2, values=[z_sample[i], self.enc_state_y[obj]])
-                    for i in xrange(self.k_traj)
-                ]
-                hidden = [
-                    [
-                        tf.nn.relu(
-                            tf.nn.xw_plus_b(
-                                inputs[i][y],
-                                weights["w_generation_1"],
-                                biases["b_generation_1"]
-                            ))
-                        for y in xrange(2*self.seq_length)
-                    ]
-                    for i in xrange(self.k_traj)
-                ]
-                logits = [
-                    [
-                        tf.nn.xw_plus_b(
-                            hidden[i][y],
-                            weights["w_generation_2"],
-                            biases["b_generation_2"])
-                        for y in xrange(2*self.seq_length)
-                    ]
-                    for i in xrange(self.k_traj)
-                ]
+                inputs = [tf.concat(1, values=[z_sample[i], self.enc_state_y[obj]]) for i in xrange(self.k_traj)]
+                hidden = [tf.nn.relu(
+                    tf.nn.xw_plus_b(
+                        inputs[i],
+                        weights["w_generation_1"],
+                        biases["b_generation_1"]
+                    )) for i in xrange(self.k_traj)]
+                logits = [tf.nn.xw_plus_b(
+                    hidden[i],
+                    weights["w_generation_2"],
+                    biases["b_generation_2"]) for i in xrange(self.k_traj)]
                 prob = tf.nn.sigmoid(logits)
                 x_samples = logits
 
             # fc layer
             with tf.variable_scope("fc_softmax"):
-                multipl = [
-                    [
-                        tf.add(
-                            tf.matmul(
-                                x_samples[i][y], weights["w_post_vae"]),
-                            biases["b_post_vae"])
-                        for y in xrange(2*self.seq_length)
-                    ]
-                    for i in xrange(self.k_traj)
-                ]
+                multipl = [tf.add(
+                    tf.matmul(x_samples[i], weights["w_post_vae"]),
+                    biases["b_post_vae"]) for i in xrange(self.k_traj)]
                 # multipl = tf.nn.relu(multipl)
                 multipl = tf.nn.softmax(multipl)
 
             # Take a note of H_x for the ranking and refinement module
             # TODO: is it deepcopied now?
-            # with tf.variable_scope("h_of_x"):
-            #     # h_of_x = tf.Variable(self.enc_state_x.initialized_value())
-            #     self.h_of_x = tf.multiply(self.enc_state_x, 1)
+            with tf.variable_scope("h_of_x"):
+                # h_of_x = tf.Variable(self.enc_state_x.initialized_value())
+                self.h_of_x = tf.multiply(self.enc_state_x, 1)
 
             # Decoder 1
             with tf.variable_scope("decoding_operations_x", reuse=True if obj > 0 else None):
-                hidden_state_x = [
-                    tf.mul(multipl[i], self.h_of_x[obj])
-                    for i in xrange(self.k_traj)
-                ]
-                self.output_states[obj], _ = \
-                    [seq2seq.rnn_decoder(
-                        hidden_state_x[i],
+                hidden_state_x = [tf.mul(multipl[i], self.enc_state_x[obj]) for i in xrange(self.k_traj)]
+                self.output_states[obj], self.enc_state_x[obj] = \
+                    seq2seq.rnn_decoder(
+                        hidden_state_x,
                         self.enc_state_x[obj],
-                        cells) for i in xrange(self.k_traj)]
+                        cells)
                 self.output_states[obj] = [
                     tf.split(
                         0, self.seq_length, tf.squeeze(_item, [0])
@@ -607,6 +535,47 @@ class DESIREModel(object):
         #         [self.output_size]))
 
         return weights, biases
+
+    def vae_decoder(self, zval, projection_size, activ=tf.nn.elu, phase=pt.Phase.train):
+        '''
+        C-VAE Decoder from https://github.com/jramapuram/CVAE/blob/master/cvae.py
+        '''
+        with pt.defaults_scope(activation_fn=activ,
+                               batch_normalize=True,
+                               learned_moments_update_rate=0.0003,
+                               variance_epsilon=0.001,
+                               scale_after_normalization=True,
+                               phase=phase):
+            return (pt.wrap(zval).
+                    reshape([-1, 1, 1, self.latent_size]).
+                    deconv2d(4, 128, edges='VALID', phase=phase).
+                    deconv2d(5, 64, edges='VALID', phase=phase).
+                    deconv2d(5, 32, stride=2, phase=phase).
+                    deconv2d(5, 1, stride=2, activation_fn=tf.nn.sigmoid, phase=phase).
+                    flatten()).tensor
+
+    def vae_encoder(self, inputs, latent_size, activ=tf.nn.elu, phase=pt.Phase.train):
+        '''
+        C-VAE Encoder from https://github.com/jramapuram/CVAE/blob/master/cvae.py
+        Accepts a cube as inputs and performs 2D convolutions on it
+        '''
+        with pt.defaults_scope(activation_fn=activ,
+                               batch_normalize=True,
+                               learned_moments_update_rate=0.0003,
+                               variance_epsilon=0.001,
+                               scale_after_normalization=True,
+                               phase=phase):
+            params = (pt.wrap(inputs).
+                      reshape([-1, self.input_shape[0], self.input_shape[1], 1]).
+                      conv2d(5, 32, stride=2).
+                      conv2d(5, 64, stride=2).
+                      conv2d(5, 128, edges='VALID').
+                      flatten().
+                      fully_connected(latent_size * 2, activation_fn=None)).tensor
+
+        mean = params[:, :latent_size]
+        stddev = params[:, latent_size:]
+        return [mean, stddev]
 
     def tf_2d_normal(self, x_val, y_val, mux, muy, sx_val, sy_val, rho):
         '''

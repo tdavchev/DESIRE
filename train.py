@@ -27,7 +27,7 @@ def main():
     '''
     parser = argparse.ArgumentParser()
     # RNN size parameter (dimension of the output/hidden state)
-    parser.add_argument('--rnn_size', type=int, default=512,
+    parser.add_argument('--rnn_size', type=int, default=48,
                         help='size of RNN hidden state')
     # Number of layers parameter
     parser.add_argument('--num_layers', type=int, default=1,
@@ -40,7 +40,7 @@ def main():
     parser.add_argument('--batch_size', type=int, default=10,
                         help='minibatch size')
     # Length of sequence to be considered parameter
-    parser.add_argument('--seq_length', type=int, default=8,
+    parser.add_argument('--seq_length', type=int, default=20,
                         help='RNN sequence length')
     # Number of epochs parameter
     parser.add_argument('--num_epochs', type=int, default=100,
@@ -77,13 +77,13 @@ def main():
     parser.add_argument('--leave_dataset', type=int, default=5,
                         help='The dataset index to be left out in training')
     # The latent size for CVAE
-    parser.add_argument('--latent_size', type=int, default=128,
+    parser.add_argument('--latent_size', type=int, default=48,
                         help='The dataset index to be left out in training')
     # The CVAE encoder's dimension
     parser.add_argument('--e_dim', type=int, default=256,
                         help='The encoder\'s output dimension')
-    parser.add_argument('--d_dim', type=int, default=16,
-                        help='The decoder\'s output dimension')
+    # parser.add_argument('--d_dim', type=int, default=16,
+    #                     help='The decoder\'s output dimension')
     parser.add_argument('--stride', type=int, default=1,
                         help='Stride size for the Temporal Convolution')
 
