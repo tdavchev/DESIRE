@@ -87,6 +87,12 @@ def main():
     parser.add_argument('--stride', type=int, default=1,
                         help='Stride size for the Temporal Convolution')
 
+    parser.add_argument('--height', type=int, default=1982,
+                        help='Context Image Height')
+
+    parser.add_argument('--width', type=int, default=1334,
+                        help='Context Image Width')
+
     args = parser.parse_args()
     train(args)
 
@@ -137,7 +143,8 @@ def train(args):
                 # arrays of size seq_length x max_num_objs x 3
                 # d is the list of dataset indices from which each batch is generated
                 # (used to differentiate between datasets)
-                xval, yval, dval = data_loader.next_batch() # x and y are 10x8x40x3
+                # x and y are 10x8x40x3
+                xval, yval, dval, reference_filenames = data_loader.next_batch()
 
                 # variable to store the loss for this batch
                 loss_batch = 0
@@ -172,10 +179,20 @@ def train(args):
                                           args.max_num_obj,
                                           3])
 
+                    sess.run(
+                        tf.assign(
+                            model.height, reference_filenames[1]
+                            ),
+                        tf.assign(
+                            model.width, reference_filenames[2]
+                            )
+                        )
+
                     # Feed the source, target data
                     feed = {
                         model.input_data: x_batch,
-                        model.target_data: y_batch
+                        model.target_data: y_batch,
+                        model.reference_data: reference_filenames[0]
                         }
 
                     train_loss = sess.run(model.cost, feed)
