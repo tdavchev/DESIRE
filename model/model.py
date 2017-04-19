@@ -20,7 +20,6 @@ from tensorflow.python.ops import rnn, rnn_cell, seq2seq
 from tensorflow.python.framework import dtypes
 
 sys.path.append("/home/s1045064/deep-learning/DESIRE")
-execfile("utils/convolutional_vae_util.py")
 # from convolutional_vae_util import deconv2d
 
 
@@ -39,6 +38,8 @@ class DESIREModel(object):
         self.filter_width = 3 # kernel of 3
         self.in_channels = 2 # one for x and y for each trajectory point
         self.out_channels = 16 # this is the feature map
+        self.syntax_filter_height = 5
+        self.syntax_filter_width = 5 # kernel of 3
         self.strides = 1 #[1, self.args.stride, self.args.stride, 1]
         self.input_size = 3
         self.grid_size = self.args.grid_size
@@ -48,6 +49,8 @@ class DESIREModel(object):
         self.seq_length = self.args.seq_length # time_steps
         self.num_layers = self.args.num_layers
         self.batch_size = self.args.batch_size
+        self.height = self.args.height
+        self.width = self.args.width
         self.z_dim = self.args.latent_size
         # self.input_shape = [int(np.sqrt(2*self.rnn_size)),
         #                     int(np.sqrt(2*self.rnn_size))]
@@ -60,6 +63,7 @@ class DESIREModel(object):
         self.input_data = None
         # self.target_data_enc = None
         self.target_data = None
+        self.reference_filename = None
         self.optimizer = None
         self.accuracy = None
         self.acc_summary = None
@@ -89,12 +93,16 @@ class DESIREModel(object):
             shape=[self.args.max_num_obj, 2*self.seq_length, self.input_size],
             name="target_data"
         )
+        self.reference_filename = tf.placeholder(
+            tf.float32,
+            shape=[1, self.height, self.width, 4],
+            name="target_data"
+        )
         self.learning_rate = tf.Variable(
             self.args.learning_rate,
             trainable=False,
             name="learning_rate"
         )
-
         self.z = tf.placeholder(
             tf.float32,
             shape=[None, self.z_dim],
@@ -112,6 +120,34 @@ class DESIREModel(object):
 
         weights, biases = self.define_weights()
 
+
+        # Static Scene Context
+        # Convolutional Layer #1
+        conv1 = tf.nn.relu(tf.add( \
+            tf.nn.conv2d(
+                input=self.reference_filename,
+                filter=weights["syntax_w1"],
+                strides=[1, 2, 2, 1],
+                padding="SAME"),
+            biases["syntax_b1"]))
+        # Convolutional Layer #2
+        conv2 = tf.nn.relu(tf.add( \
+            tf.nn.conv2d(
+                input=conv1,
+                filter=weights["syntax_w2"],
+                strides=[1, 1, 1, 1],
+                padding="SAME"),
+            biases["syntax_b2"]))
+        # Convolutional Layer #3
+        rho_i = tf.nn.relu(tf.add( \
+            tf.nn.conv2d(
+                input=conv2,
+                filter=weights["syntax_w3"],
+                strides=[1, 1, 1, 1],
+                padding="SAME"),
+            biases["syntax_b3"]))
+
+        # 1D Temporal Convolution
         temporal_shape = self.input_data.get_shape().as_list()
         temporal_shape[-1] = temporal_shape[-1] - 1
         temporal_input = tf.slice(
@@ -140,6 +176,7 @@ class DESIREModel(object):
         )
         temporal_ids_y = self.target_data[:, :, 2:]
         # The Formula for the Model
+
         # Temporal convolution
         with tf.variable_scope("temporal_convolution_y"):
             self.temporal_input_y = tf.nn.relu(tf.add( \
@@ -327,13 +364,14 @@ class DESIREModel(object):
 
             loop_function = None
             with tf.variable_scope("rnn_decoder"):
-                state = self.enc_state_x[obj]
                 outputs = [[] for k in xrange(self.k_traj)]
                 prev = None
                 decoder_inputs = [
                     tf.pad(tf.mul(multipl[k], self.enc_state_x[obj]), [[0, 39], [0, 0]], "CONSTANT")
                     for k in xrange(self.k_traj)]
+                # Suspect that IOC is under this loop too
                 for k, inp in enumerate(decoder_inputs):
+                    state = tf.zeros([1, 48]) # self.enc_state_x[obj]
                     inp = tf.split(0, 2*self.seq_length, inp)
                     for t_step, location in enumerate(inp):
                         if k > 0 or t_step > 0:
@@ -474,6 +512,33 @@ class DESIREModel(object):
         # TODO:Make sure you learn the dimensionalities!!!!!
         weights, biases = {}, {}
         with tf.variable_scope("temporal_weights"):
+            weights["syntax_w1"] = tf.Variable(tf.truncated_normal( \
+                [self.syntax_filter_height,
+                 self.syntax_filter_width,
+                 2*self.in_channels,
+                 self.out_channels],
+                stddev=0.1))
+            biases["syntax_b1"] = tf.Variable(tf.random_normal( \
+                [self.out_channels]))
+
+            weights["syntax_w2"] = tf.Variable(tf.truncated_normal( \
+                [self.syntax_filter_height,
+                 self.syntax_filter_width,
+                 self.out_channels,
+                 2*self.out_channels],
+                stddev=0.1))
+            biases["syntax_b2"] = tf.Variable(tf.random_normal( \
+                [2*self.out_channels]))
+
+            weights["syntax_w3"] = tf.Variable(tf.truncated_normal( \
+                [self.syntax_filter_height,
+                 self.syntax_filter_width,
+                 2*self.out_channels,
+                 2*self.out_channels],
+                stddev=0.1))
+            biases["syntax_b3"] = tf.Variable(tf.random_normal( \
+                [2*self.out_channels]))
+
             # This is the filter window
             weights["temporal_w"] = tf.Variable(tf.truncated_normal( \
                 [self.filter_width, self.in_channels, self.out_channels],
