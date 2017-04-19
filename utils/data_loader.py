@@ -11,6 +11,9 @@ import pickle
 import random
 import sys
 import numpy as np
+import struct
+import imghdr
+from scipy import misc
 
 sys.path.append("/home/s1045064/deep-learning/DESIRE")
 
@@ -81,13 +84,33 @@ class DataLoader(object):
         # numobj_data would be a list of lists corresponding to each dataset
         # Each list would contain the number of objestrians in each frame in the dataset
         num_obj_data = []
+        reference_filenames = []
         # Index of the current dataset
-        dataset_index = 0
-
+        dataset_index = -1
+        tmp_dir = ""
         # For each dataset
         for subdir, dirs, files in os.walk(self.data_dir):
             for file in files:
                 # if dataset_index != leave_dataset and \
+                if dataset_index < self.leave_dataset and \
+                    file == 'reference.jpg':
+                    # filenames = ['im_01.jpg', 'im_02.jpg', 'im_03.jpg', 'im_04.jpg']
+                    reference_filenames.append([])
+                    # step 2
+                    file_path = os.path.join(subdir, file)
+                    width, height = self.get_image_size(file_path)
+                    img = misc.imread(file_path,  mode="CMYK")
+                    # img = self.rgb_to_cmyk(img[:, :, 0], img[:, :, 1], img[:, :, 2])
+                    # filename_queue = tf.train.string_input_producer(file_path)
+
+                    # # read, decode and resize images
+                    # reader = tf.WholeFileReader()
+                    # filename, content = reader.read(filename_queue)
+                    # image = tf.image.decode_jpeg(content, channels=4)
+                    # image = tf.cast(image, tf.float32)
+                    # resized_image = tf.image.resize_images(image, [height, width])
+                    reference_filenames[dataset_index] = [img, height, width]
+
                 if dataset_index < self.leave_dataset and \
                     file == 'annotations_processed.csv':
 
@@ -142,12 +165,15 @@ class DataLoader(object):
 
                         # Increment the frame index
                         curr_frame += 1
-                    # Increment the dataset index
-                    dataset_index += 1
+            if subdir != "data/" and subdir != tmp_dir:
+                # Increment the dataset index
+                dataset_index += 1
+                tmp_dir = subdir
 
         # Save the tuple (all_frame_data, frame_list_data, num_obj_data) in the pickle file
         file = open(data_file, "wb")
-        pickle.dump((all_frame_data, frame_list_data, num_obj_data), file, protocol=2)
+        pickle.dump((all_frame_data, frame_list_data, num_obj_data, reference_filenames),
+                    file, protocol=2)
         file.close()
 
     def load_preprocessed(self, data_file):
@@ -165,6 +191,7 @@ class DataLoader(object):
         self.data = self.raw_data[0]
         self.frame_list = self.raw_data[1]
         self.num_obj_list = self.raw_data[2]
+        self.reference_filenames = self.raw_data[3]
         counter = 0
 
         # For each dataset
@@ -186,6 +213,7 @@ class DataLoader(object):
         '''
         Function to get the next batch of points
         '''
+        semantic_context_data = []
         # Source data
         x_batch = []
         # Target data
@@ -197,6 +225,7 @@ class DataLoader(object):
         while i < self.batch_size:
             # Extract the frame data of the current dataset
             current_data = self.data[self.dataset_pointer]
+            current_ref_filenames = self.reference_filenames[self.dataset_pointer]
             # Get the frame pointer for the current dataset
             idx = self.frame_pointer
             # While there is still seq_length number of frames left in the current dataset
@@ -244,7 +273,7 @@ class DataLoader(object):
                 # Increment the dataset pointer and set the frame_pointer to zero
                 self.tick_batch_pointer()
 
-        return x_batch, y_batch, dval
+        return x_batch, y_batch, dval, current_ref_filenames
 
     def tick_batch_pointer(self):
         '''
@@ -264,3 +293,38 @@ class DataLoader(object):
         # Go to the first frame of the first dataset
         self.dataset_pointer = 0
         self.frame_pointer = 0
+
+    def get_image_size(self, fname):
+        '''Determine the image type of fhandle and return its size.
+        from draco'''
+        with open(fname, 'rb') as fhandle:
+            head = fhandle.read(24)
+            if len(head) != 24:
+                return
+            if imghdr.what(fname) == 'png':
+                check = struct.unpack('>i', head[4:8])[0]
+                if check != 0x0d0a1a0a:
+                    return
+                width, height = struct.unpack('>ii', head[16:24])
+            elif imghdr.what(fname) == 'gif':
+                width, height = struct.unpack('<HH', head[6:10])
+            elif imghdr.what(fname) == 'jpeg':
+                try:
+                    fhandle.seek(0) # Read 0xff next
+                    size = 2
+                    ftype = 0
+                    while not 0xc0 <= ftype <= 0xcf:
+                        fhandle.seek(size, 1)
+                        byte = fhandle.read(1)
+                        while ord(byte) == 0xff:
+                            byte = fhandle.read(1)
+                        ftype = ord(byte)
+                        size = struct.unpack('>H', fhandle.read(2))[0] - 2
+                    # We are at a SOFn block
+                    fhandle.seek(1, 1)  # Skip `precision' byte.
+                    height, width = struct.unpack('>HH', fhandle.read(4))
+                except Exception: #IGNORE:W0703
+                    return
+            else:
+                return
+            return width, height
