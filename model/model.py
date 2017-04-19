@@ -32,48 +32,26 @@ class DESIREModel(object):
 
     def __init__(self, args):
         self.args = args
-        # TODO: remove the unnecesary variables
-        # TODO: rename decoder_output to hidden_features
         self.filter_height = 1
         self.filter_width = 3 # kernel of 3
         self.in_channels = 2 # one for x and y for each trajectory point
         self.out_channels = 16 # this is the feature map
         self.syntax_filter_height = 5
         self.syntax_filter_width = 5 # kernel of 3
-        self.strides = 1 #[1, self.args.stride, self.args.stride, 1]
+        self.strides = 1
         self.input_size = 3
         self.grid_size = self.args.grid_size
         self.encoder_output = self.args.e_dim
         self.rnn_size = self.args.rnn_size # hidden_features
-        # self.decoder_output = self.args.d_dim # hidden_features
         self.seq_length = self.args.seq_length # time_steps
         self.num_layers = self.args.num_layers
         self.batch_size = self.args.batch_size
         self.height = self.args.height
         self.width = self.args.width
         self.z_dim = self.args.latent_size
-        # self.input_shape = [int(np.sqrt(2*self.rnn_size)),
-        #                     int(np.sqrt(2*self.rnn_size))]
-        # self.vae_input_size = np.prod(self.input_shape)
         self.vae_input_size = self.rnn_size
         self.max_num_obj = self.args.max_num_obj
         self.k_traj = 7
-
-        self.output_states = None
-        self.input_data = None
-        # self.target_data_enc = None
-        self.target_data = None
-        self.reference_filename = None
-        self.optimizer = None
-        self.accuracy = None
-        self.acc_summary = None
-        self.learning_rate = None
-        self.output_size = None
-        self.gru_states = None
-        self.output_states = None
-        self.spatial_input = None
-        self.enc_state_x = None
-        self.enc_state_y = None
 
         self.build_model()
 
@@ -108,8 +86,7 @@ class DESIREModel(object):
             shape=[None, self.z_dim],
             name="z"
         )
-        # a grid cell of other pedestrian
-        # i
+
         # self.grid_data = tf.placeholder(
         #     tf.float32,
         #     [self.seq_length, self.max_num_obj, self.max_num_obj, self.grid_size*self.grid_size],
@@ -355,14 +332,14 @@ class DESIREModel(object):
 
             # Take a note of H_x for the ranking and refinement module
             # TODO: is it deepcopied now?
-            with tf.variable_scope("h_of_x", reuse=True if obj > 0 else None):
-                # h_of_x = tf.Variable(self.enc_state_x.initialized_value())
-                self.h_of_x = tf.multiply(self.enc_state_x, 1)
-                self.h_of_x = tf.squeeze(tf.split(0, self.max_num_obj, self.h_of_x), [1])
+            # with tf.variable_scope("h_of_x", reuse=True if obj > 0 else None):
+            #     # h_of_x = tf.Variable(self.enc_state_x.initialized_value())
+            #     self.h_of_x = tf.multiply(self.enc_state_x, 1)
+            #     self.h_of_x = tf.squeeze(tf.split(0, self.max_num_obj, self.h_of_x), [1])
 
             output = []
-
             loop_function = None
+            sample_reconstr = []
             with tf.variable_scope("rnn_decoder"):
                 outputs = [[] for k in xrange(self.k_traj)]
                 prev = None
@@ -371,9 +348,11 @@ class DESIREModel(object):
                     for k in xrange(self.k_traj)]
                 # Suspect that IOC is under this loop too
                 for k, inp in enumerate(decoder_inputs):
+                    sample_reconstr.append([])
                     state = tf.zeros([1, 48]) # self.enc_state_x[obj]
                     inp = tf.split(0, 2*self.seq_length, inp)
                     for t_step, location in enumerate(inp):
+                        sample_reconstr[k].append([])
                         if k > 0 or t_step > 0:
                             tf.get_variable_scope().reuse_variables()
                         output, state = cells(location, state)
@@ -381,42 +360,9 @@ class DESIREModel(object):
                         if loop_function is not None:
                             prev = output
 
-            #TODO: Create a regression tensor and add it to the output_states[obj]
-            #TODO: The two for-loops can go to a function
-            #TODO: Fix it with IRL
-            gamma_velocity = []
-            for prediction_k in xrange(len(self.output_states[obj])):
-                pooling_list.append([])
-                gamma_velocity.append([])
-                for step_t in xrange(len(self.output_states[obj][prediction_k])):
-                    current_step_frame = self.output_states[obj][prediction_k][step_t]
-                    pooling_list[prediction_k].append(
-                        tf.concat(
-                            0, [tf.multiply
-                                (
-                                    current_step_frame[0],
-                                    self.temporal[obj][:100]
-                                ),
-                                tf.multiply
-                                (
-                                    current_step_frame[1],
-                                    self.temporal[obj][100:]
-                                )]
-                            ))
-                    gamma_velocity[prediction_k].append(
-                        tf.nn.relu( \
-                            tf.nn.xw_plus_b( \
-                                 tf.reshape(current_step_frame, [1, 2]),
-                                 weights["w_velocity_gamma"],
-                                 biases["b_velocity_gamma"]))
-                    )
+                        sample_reconstr[k][t_step] = tf.nn.xw_plus_b(
+                            outputs[k][t_step], weights["reconstr_w"], biases["reconstr_b"])
 
-            self.feature_pooling[obj] = tf.pack(pooling_list)
-            # fc layer
-            with tf.variable_scope("fc_relu"):
-                gamma = tf.pack(gamma_velocity)
-
-            social_tensor = self.getSocialTensor(current_grid_frame_data, self.output_states)
             # TODO: check if KLD loss actually has reconstruction loss in it
             # TODO: make sure that the CVAE implementation is truly from the same paper
             # TODO: Figure out how/if necessary to divide by K the reconstr_loss
@@ -511,7 +457,8 @@ class DESIREModel(object):
         # Weights adn Biases for hidden layer and output layer
         # TODO:Make sure you learn the dimensionalities!!!!!
         weights, biases = {}, {}
-        with tf.variable_scope("temporal_weights"):
+
+        with tf.variable_scope("semantic_context1"):
             weights["syntax_w1"] = tf.Variable(tf.truncated_normal( \
                 [self.syntax_filter_height,
                  self.syntax_filter_width,
@@ -521,6 +468,7 @@ class DESIREModel(object):
             biases["syntax_b1"] = tf.Variable(tf.random_normal( \
                 [self.out_channels]))
 
+        with tf.variable_scope("semantic_context2"):
             weights["syntax_w2"] = tf.Variable(tf.truncated_normal( \
                 [self.syntax_filter_height,
                  self.syntax_filter_width,
@@ -530,6 +478,7 @@ class DESIREModel(object):
             biases["syntax_b2"] = tf.Variable(tf.random_normal( \
                 [2*self.out_channels]))
 
+        with tf.variable_scope("semantic_context3"):
             weights["syntax_w3"] = tf.Variable(tf.truncated_normal( \
                 [self.syntax_filter_height,
                  self.syntax_filter_width,
@@ -539,6 +488,7 @@ class DESIREModel(object):
             biases["syntax_b3"] = tf.Variable(tf.random_normal( \
                 [2*self.out_channels]))
 
+        with tf.variable_scope("temporal_weights"):
             # This is the filter window
             weights["temporal_w"] = tf.Variable(tf.truncated_normal( \
                 [self.filter_width, self.in_channels, self.out_channels],
@@ -590,17 +540,10 @@ class DESIREModel(object):
             biases["b_post_vae"] = tf.Variable(tf.zeros( \
                 [self.rnn_size]))
 
-        with tf.variable_scope("velocity_gamma_weights"):
-            weights["w_velocity_gamma"] = tf.Variable(tf.random_normal( \
-                [2, 2]))
-            biases["b_velocity_gamma"] = tf.Variable(tf.random_normal( \
-                [2]))
-
-        # with tf.variable_scope("output_weights"):
-        #     weights["output_w"] = tf.Variable(tf.random_normal( \
-        #         [self.rnn_size, self.output_size]))
-        #     biases["output_b"] = tf.Variable(tf.random_normal( \
-        #         [self.output_size]))
+        with tf.variable_scope("sample_reconstruction"):
+            weights["reconstr_w"] = tf.Variable(tf.random_normal( \
+                [self.rnn_size, 2]))
+            biases["reconstr_b"] = tf.Variable(tf.zeros([2]))
 
         return weights, biases
 
