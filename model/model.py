@@ -76,6 +76,12 @@ class DESIREModel(object):
             shape=[1, self.height, self.width, 4],
             name="target_data"
         )
+        # Indicator function to show the position of each agent at a given frame
+        self.features_batch = tf.placeholder(
+            tf.float32,
+            shape=[2*self.seq_length, self.max_num_obj, self.height/2, self.width/2, 2],
+            name="features_batch"
+        )
         self.learning_rate = tf.Variable(
             self.args.learning_rate,
             trainable=False,
@@ -123,6 +129,7 @@ class DESIREModel(object):
                 strides=[1, 1, 1, 1],
                 padding="SAME"),
             biases["syntax_b3"]))
+        rho_i = tf.squeeze(rho_i, [0])
 
         # 1D Temporal Convolution
         temporal_shape = self.input_data.get_shape().as_list()
@@ -133,8 +140,7 @@ class DESIREModel(object):
             temporal_shape
         )
         temporal_ids = self.input_data[:, :, 2:]
-        # The Formula for the Model
-        # Temporal convolution
+
         with tf.variable_scope("temporal_convolution"):
             self.temporal_input = tf.nn.relu(tf.add( \
                 tf.nn.conv1d(
@@ -152,9 +158,7 @@ class DESIREModel(object):
             temporal_shape_y
         )
         temporal_ids_y = self.target_data[:, :, 2:]
-        # The Formula for the Model
 
-        # Temporal convolution
         with tf.variable_scope("temporal_convolution_y"):
             self.temporal_input_y = tf.nn.relu(tf.add( \
                 tf.nn.conv1d(
@@ -363,6 +367,34 @@ class DESIREModel(object):
                         sample_reconstr[k][t_step] = tf.nn.xw_plus_b(
                             outputs[k][t_step], weights["reconstr_w"], biases["reconstr_b"])
 
+                    # seems a bit fishy, is this correct ?
+                    self.velocity = tf.nn.relu(tf.nn.xw_plus_b( \
+                        tf.squeeze(
+                            tf.nn.conv1d(
+                                tf.reshape(sample_reconstr[k], [1, 2*self.seq_length, 2]),
+                                weights["velocity_w"],
+                                self.strides,
+                                padding='SAME'
+                                ), [0]),
+                        weights["velocityp_w"],
+                        biases["velocityp_b"]))
+
+                    # feature pooling
+                    for t_step, location in enumerate(inp):
+                        # Obtained by multiplying the static context tensor
+                        # by the indicator matrix. Resulting in a 32x2 tensor
+                        # Multiply this by the sample reconstruction tensor of size 1x2
+                        # Result is 1x32
+                        pooled_static = tf.reshape(
+                            tf.matmul(
+                                tf.add_n([
+                                    tf.matmul(tf.transpose(rho_i[h]),
+                                                self.features_batch[t_step][obj][h])
+                                    for h in xrange(self.height/2)
+                                ]),
+                                tf.transpose(sample_reconstr[k][t_step])),
+                            [1, 2*self.out_channels])
+
             # TODO: check if KLD loss actually has reconstruction loss in it
             # TODO: make sure that the CVAE implementation is truly from the same paper
             # TODO: Figure out how/if necessary to divide by K the reconstr_loss
@@ -504,6 +536,17 @@ class DESIREModel(object):
             biases["temporal_b_y"] = tf.Variable(tf.random_normal( \
                 [self.out_channels]))
 
+        with tf.variable_scope("velocity_weights"):
+            # This is the filter window
+            weights["velocity_w"] = tf.Variable(tf.truncated_normal( \
+                [self.filter_width, 2, 2],
+                stddev=0.1))
+            weights["velocityp_w"] = tf.Variable(tf.truncated_normal( \
+                [2, self.out_channels],
+                stddev=0.1))
+            biases["velocityp_b"] = tf.Variable(tf.random_normal( \
+                [self.out_channels]))
+
         with tf.variable_scope("hidden_enc_weights"):
             weights["w_hidden_enc1"] = tf.Variable(tf.random_normal( \
                 [2*self.rnn_size, self.vae_input_size]))
@@ -578,6 +621,16 @@ class DESIREModel(object):
         result = tf.div(result, denom)
         return result
 
+    def get_locations_tensor(self, features_data, prediction, spatial_context):
+        '''
+        Modified from: https://github.com/vvanirudh/social-lstm-tf
+        Computes the social tensor for all the maxNumPeds in the frame
+        params:
+        grid_frame_data : A tensor of shape MNP x MNP x (GS**2)
+        output_states : A list of tensors each of shape 1 x RNN_size of length MNP
+        '''
+        location_tensor = tf.zeros([self.height/2, self.width/2])
+        # features_data_obj = tf.split()
     def get_social_tensor(self, grid_frame_data, output_states):
         '''
         Modified from: https://github.com/vvanirudh/social-lstm-tf
