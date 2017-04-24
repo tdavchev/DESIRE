@@ -52,6 +52,8 @@ class DESIREModel(object):
         self.vae_input_size = self.rnn_size
         self.max_num_obj = self.args.max_num_obj
         self.k_traj = 7
+        self.radial_bin = 6
+        self.angular_bin = 6
 
         self.build_model()
 
@@ -92,12 +94,16 @@ class DESIREModel(object):
             shape=[None, self.z_dim],
             name="z"
         )
-
-        # self.grid_data = tf.placeholder(
-        #     tf.float32,
-        #     [self.seq_length, self.max_num_obj, self.max_num_obj, self.grid_size*self.grid_size],
-        #     name="grid_data"
-        # )
+        self.grid_data = tf.placeholder(
+            tf.float32,
+            [
+                2*self.seq_length,
+                self.max_num_obj,
+                self.max_num_obj,
+                self.radial_bin*self.angular_bin
+            ],
+            name="grid_data"
+        )
 
         self.output_size = self.seq_length * 2
 
@@ -221,10 +227,24 @@ class DESIREModel(object):
                 tf.split(0, self.args.max_num_obj, \
                     tf.zeros([
                         self.args.max_num_obj,
-                        self.k_traj,
-                        self.seq_length,
                         cells.output_size
                     ]))
+            # self.output_states = [
+            #     tf.squeeze(self.output_states[i], [0])
+            #     for i in xrange(len(self.output_states))]
+            # self.output_states = [
+            #     tf.split(0, self.k_traj, self.output_states[i])
+            #     for i in xrange(len(self.output_states))]
+            # self.output_states = [
+            #     [
+            #         tf.squeeze(self.output_states[i][j], [0])
+            #         for j in xrange(self.k_traj)]
+            #     for i in xrange(self.max_num_obj)]
+            # self.output_states = [
+            #     [
+            #         tf.split(0, 2*self.seq_length, self.output_states[i][j])
+            #         for j in xrange(self.k_traj)]
+            #     for i in xrange(self.max_num_obj)]
 
         # List of tensors each of shape args.maxNumPedsx3 corresponding to
         # each frame in the sequence
@@ -252,11 +272,11 @@ class DESIREModel(object):
         with tf.name_scope("non_existent_obj_stuff"):
             nonexistent_obj = tf.constant(0.0, name="zero_obj")
 
-        # with tf.name_scope("grid_frame_data_tensors"):
-        #     # This would contain a list of tensors each of
-        #     # shape OBJ x OBJ x (GS**2) encoding the mask
-        #     grid_frame_data = [tf.squeeze(input_, [0]) \
-        #         for input_ in tf.split(0, self.seq_length, self.grid_data)]
+        with tf.name_scope("grid_frame_data_tensors"):
+            # This would contain a list of tensors each of shape
+            # MNP x MNP x (GS**2) encoding the mask
+            grid_data_split = tf.split(0, 2*self.seq_length, self.grid_data)
+            grid_frame_data = [tf.squeeze(input_, [0]) for input_ in grid_data_split]
 
         for obj in xrange(0, self.args.max_num_obj):
             obj_id = temporal_ids[obj][0][0]
@@ -334,41 +354,43 @@ class DESIREModel(object):
                 # multipl = tf.nn.relu(multipl)
                 multipl = tf.nn.softmax(multipl)
 
-            # Take a note of H_x for the ranking and refinement module
-            # TODO: is it deepcopied now?
-            # with tf.variable_scope("h_of_x", reuse=True if obj > 0 else None):
-            #     # h_of_x = tf.Variable(self.enc_state_x.initialized_value())
-            #     self.h_of_x = tf.multiply(self.enc_state_x, 1)
-            #     self.h_of_x = tf.squeeze(tf.split(0, self.max_num_obj, self.h_of_x), [1])
-
             output = []
             loop_function = None
             sample_reconstr = []
             with tf.variable_scope("rnn_decoder"):
-                outputs = [[] for k in xrange(self.k_traj)]
+                # outputs = [[] for k in xrange(self.k_traj)]
                 prev = None
                 decoder_inputs = [
                     tf.pad(tf.mul(multipl[k], self.enc_state_x[obj]), [[0, 39], [0, 0]], "CONSTANT")
                     for k in xrange(self.k_traj)]
-                # Suspect that IOC is under this loop too
-                for k, inp in enumerate(decoder_inputs):
-                    sample_reconstr.append([])
-                    state = tf.zeros([1, 48]) # self.enc_state_x[obj]
-                    inp = tf.split(0, 2*self.seq_length, inp)
-                    for t_step, location in enumerate(inp):
-                        sample_reconstr[k].append([])
-                        if k > 0 or t_step > 0:
-                            tf.get_variable_scope().reuse_variables()
-                        output, state = cells(location, state)
-                        outputs[k].append(output)
-                        if loop_function is not None:
-                            prev = output
 
+            # Suspect that IOC is under this loop too
+            for k, inp in enumerate(decoder_inputs):
+                sample_reconstr.append([])
+                state = tf.zeros([1, 48]) # self.enc_state_x[obj]
+                inp = tf.split(0, 2*self.seq_length, inp)
+                for t_step, location in enumerate(inp):
+                    sample_reconstr[k].append([])
+                    if k > 0 or t_step > 0:
+                        tf.get_variable_scope().reuse_variables()
+
+                    with tf.variable_scope("output_onecell") as scope:
+                        if t_step > 0 or obj > 0 or k > 0:
+                            scope.reuse_variables()
+                        self.output_states[obj], state = cells(location, state)
+                        # outputs[k].append(output)
+                    if loop_function is not None:
+                        prev = output
+
+                    with tf.variable_scope("samples"):
                         sample_reconstr[k][t_step] = tf.nn.xw_plus_b(
-                            outputs[k][t_step], weights["reconstr_w"], biases["reconstr_b"])
+                            self.output_states[obj],
+                            weights["reconstr_w"],
+                            biases["reconstr_b"])
 
-                    # seems a bit fishy, is this correct ?
-                    self.velocity = tf.nn.relu(tf.nn.xw_plus_b( \
+                # seems a bit fishy, is this correct ?
+                with tf.variable_scope("velocity"):
+                    velocity = tf.nn.relu(tf.nn.xw_plus_b( \
                         tf.squeeze(
                             tf.nn.conv1d(
                                 tf.reshape(sample_reconstr[k], [1, 2*self.seq_length, 2]),
@@ -379,25 +401,42 @@ class DESIREModel(object):
                         weights["velocityp_w"],
                         biases["velocityp_b"]))
 
-                    # feature pooling
-                    for t_step, location in enumerate(inp):
-                        # Obtained by multiplying the static context tensor
-                        # by the indicator matrix. Resulting in a 32x2 tensor
-                        # Multiply this by the sample reconstruction tensor of size 1x2
-                        # Result is 1x32
+                # feature pooling
+                for t_step, location in enumerate(inp):
+                    # Obtained by multiplying the static context tensor
+                    # by the indicator matrix. Resulting in a 32x2 tensor
+                    # Multiply this by the sample reconstruction tensor of size 1x2
+                    # Result is 1x32
+                    with tf.variable_scope("static_pool"):
                         pooled_static = tf.reshape(
                             tf.matmul(
                                 tf.add_n([
                                     tf.matmul(tf.transpose(rho_i[h]),
-                                                self.features_batch[t_step][obj][h])
+                                              self.features_batch[t_step][obj][h])
                                     for h in xrange(self.height/2)
                                 ]),
                                 tf.transpose(sample_reconstr[k][t_step])),
                             [1, 2*self.out_channels])
 
+                    # obs_seq x MNP x MNP x (GS**2) tensor
+                    current_grid_frame_data = grid_frame_data[t_step]
+                    social_tensor = self.get_social_tensor(
+                        current_grid_frame_data, self.output_states)
+                    social_input = tf.slice(
+                        social_tensor,
+                        [obj, 0],
+                        [1, self.radial_bin*self.angular_bin*self.rnn_size])
+                    # Embed the tensor input
+                    embedded_social_input = tf.nn.relu(
+                        tf.nn.xw_plus_b(social_input, weights["social_w"], biases["social_b"]))
+                    with tf.name_scope("concatenate_scf"):
+                        # Concatenate the embeddings
+                        complete_input = tf.concat(
+                            1,
+                            [pooled_static,
+                             tf.reshape(velocity[obj], [1, self.out_channels]),
+                             embedded_social_input])
             # TODO: check if KLD loss actually has reconstruction loss in it
-            # TODO: make sure that the CVAE implementation is truly from the same paper
-            # TODO: Figure out how/if necessary to divide by K the reconstr_loss
             # TODO: The reconstr loss does not sample from a distribution anymore but instead
             #       chooses the most probable trajectory from the IOC (verify)
             with tf.name_scope("calculate_loss"):
@@ -588,6 +627,11 @@ class DESIREModel(object):
                 [self.rnn_size, 2]))
             biases["reconstr_b"] = tf.Variable(tf.zeros([2]))
 
+        with tf.variable_scope("social_weights"):
+            weights["social_w"] = tf.Variable(tf.random_normal( \
+                [self.radial_bin*self.angular_bin*self.rnn_size, self.rnn_size]))
+            biases["social_b"] = tf.Variable(tf.zeros([self.rnn_size]))
+
         return weights, biases
 
     def tf_2d_normal(self, x_val, y_val, mux, muy, sx_val, sy_val, rho):
@@ -640,28 +684,35 @@ class DESIREModel(object):
         output_states : A list of tensors each of shape 1 x RNN_size of length MNP
         '''
         # Create a zero tensor of shape MNP x (GS**2) x RNN_size
-        social_tensor = tf.zeros([self.args.maxNumPeds, self.grid_size*self.grid_size, self.rnn_size], name="social_tensor")
+        social_tensor = tf.zeros(
+            [self.max_num_obj, self.radial_bin*self.angular_bin, self.rnn_size],
+            name="social_tensor")
         # Create a list of zero tensors each of shape 1 x (GS**2) x RNN_size of length MNP
-        social_tensor = tf.split(0, self.args.maxNumPeds, social_tensor)
+        social_tensor = tf.split(0, self.max_num_obj, social_tensor)
         # Concatenate list of hidden states to form a tensor of shape MNP x RNN_size
         hidden_states = tf.concat(0, output_states)
         # Split the grid_frame_data into grid_data for each pedestrians
         # Consists of a list of tensors each of shape 1 x MNP x (GS**2) of length MNP
-        grid_frame_ped_data = tf.split(0, self.args.maxNumPeds, grid_frame_data)
+        grid_frame_ped_data = tf.split(0, self.max_num_obj, grid_frame_data)
         # Squeeze tensors to form MNP x (GS**2) matrices
         grid_frame_ped_data = [tf.squeeze(input_, [0]) for input_ in grid_frame_ped_data]
 
         # For each pedestrian
-        for ped in range(self.args.maxNumPeds):
+        for ped in range(self.max_num_obj):
             # Compute social tensor for the current pedestrian
             with tf.name_scope("tensor_calculation"):
                 social_tensor_ped = tf.matmul(tf.transpose(grid_frame_ped_data[ped]), hidden_states)
-                social_tensor[ped] = tf.reshape(social_tensor_ped, [1, self.grid_size*self.grid_size, self.rnn_size])
+                social_tensor[ped] = tf.reshape(
+                    social_tensor_ped,
+                    [1, self.radial_bin*self.angular_bin, self.rnn_size])
 
         # Concatenate the social tensor from a list to a tensor of shape MNP x (GS**2) x RNN_size
         social_tensor = tf.concat(0, social_tensor)
         # Reshape the tensor to match the dimensions MNP x (GS**2 * RNN_size)
-        social_tensor = tf.reshape(social_tensor, [self.args.maxNumPeds, self.grid_size*self.grid_size*self.rnn_size])
+        social_tensor = tf.reshape(
+            social_tensor,
+            [self.max_num_obj, self.radial_bin*self.angular_bin*self.rnn_size])
+
         return social_tensor
 
     def get_reconstr_loss(self, z_mux, z_muy, z_sx, z_sy, z_corr, x_data, y_data):
