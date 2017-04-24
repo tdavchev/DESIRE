@@ -178,6 +178,9 @@ def train(args):
                                          [args.seq_length,
                                           args.max_num_obj,
                                           3])
+                    dataset_data = [args.height, args.width]
+                    # Pass x_batch or y_batch ?!?!?!, suspect it's y
+                    features_batch = get_sequence_location_mask(y_batch, dataset_data)
 
                     sess.run(
                         tf.assign(
@@ -192,7 +195,8 @@ def train(args):
                     feed = {
                         model.input_data: x_batch,
                         model.target_data: y_batch,
-                        model.reference_data: reference_filenames[0]
+                        model.reference_data: reference_filenames[0],
+                        model.features_batch: features_batch
                         }
 
                     train_loss = sess.run(model.cost, feed)
