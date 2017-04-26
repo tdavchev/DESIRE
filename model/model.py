@@ -189,6 +189,20 @@ class DESIREModel(object):
                 state_is_tuple=False
             )
 
+        with tf.variable_scope("gru_y_cell"):
+            gru_cell_samples = tf.nn.rnn_cell.GRUCell(self.rnn_size)
+            cells_s = tf.nn.rnn_cell.MultiRNNCell(
+                [gru_cell_samples]*self.num_layers,
+                state_is_tuple=False
+            )
+
+        with tf.variable_scope("gru_y_cell"):
+            gru_cell_decoder_two = tf.nn.rnn_cell.GRUCell(self.rnn_size)
+            cells_dtwo = tf.nn.rnn_cell.MultiRNNCell(
+                [gru_cell_decoder_two]*self.num_layers,
+                state_is_tuple=False
+            )
+
         # Define GRU states for each pedestrian
         with tf.variable_scope("gru_states"):
             self.gru_states = tf.zeros(
@@ -227,14 +241,15 @@ class DESIREModel(object):
                 tf.split(0, self.args.max_num_obj, \
                     tf.zeros([
                         self.args.max_num_obj,
+                        self.k_traj,
                         cells.output_size
                     ]))
-            # self.output_states = [
-            #     tf.squeeze(self.output_states[i], [0])
-            #     for i in xrange(len(self.output_states))]
-            # self.output_states = [
-            #     tf.split(0, self.k_traj, self.output_states[i])
-            #     for i in xrange(len(self.output_states))]
+            self.output_states = [
+                tf.squeeze(self.output_states[i], [0])
+                for i in xrange(len(self.output_states))]
+            self.output_states = [
+                tf.split(0, self.k_traj, self.output_states[i])
+                for i in xrange(len(self.output_states))]
             # self.output_states = [
             #     [
             #         tf.squeeze(self.output_states[i][j], [0])
@@ -277,6 +292,46 @@ class DESIREModel(object):
             # MNP x MNP x (GS**2) encoding the mask
             grid_data_split = tf.split(0, 2*self.seq_length, self.grid_data)
             grid_frame_data = [tf.squeeze(input_, [0]) for input_ in grid_data_split]
+
+        with tf.name_scope("decoder_inputs"):
+            self.decoder_inputs = tf.split(
+                0,
+                self.max_num_obj,
+                tf.zeros([self.max_num_obj, self.k_traj, 2*self.seq_length, self.rnn_size]))
+            self.decoder_inputs = [
+                tf.squeeze(self.decoder_inputs[i], [0])
+                for i in xrange(self.max_num_obj)]
+            self.decoder_inputs = [
+                tf.split(0, self.k_traj, self.decoder_inputs[i])
+                for i in xrange(self.max_num_obj)]
+            self.decoder_inputs = [
+                [
+                    tf.squeeze(self.decoder_inputs[i][j], [0])
+                    for j in xrange(self.k_traj)]
+                for i in xrange(self.max_num_obj)]
+
+        with tf.name_scope("sample_reconstr"):
+            self.sample_reconstr = tf.split(
+                0,
+                self.max_num_obj,
+                tf.zeros([self.max_num_obj, self.k_traj, 2*self.seq_length, 2]))
+            self.sample_reconstr = [
+                tf.squeeze(self.sample_reconstr[i], [0])
+                for i in xrange(len(self.sample_reconstr))]
+            self.sample_reconstr = [
+                tf.split(0, self.k_traj, self.sample_reconstr[i])
+                for i in xrange(len(self.sample_reconstr))]
+            self.sample_reconstr = [
+                [
+                    tf.squeeze(self.sample_reconstr[i][j], [0])
+                    for j in xrange(self.k_traj)]
+                for i in xrange(self.max_num_obj)]
+            self.sample_reconstr = [
+                [
+                    tf.split(0, 2*self.seq_length, self.sample_reconstr[i][j])
+                    for j in xrange(self.k_traj)]
+                for i in xrange(self.max_num_obj)]
+        # sample_reconstr.append([])
 
         for obj in xrange(0, self.args.max_num_obj):
             obj_id = temporal_ids[obj][0][0]
@@ -356,57 +411,51 @@ class DESIREModel(object):
 
             output = []
             loop_function = None
-            sample_reconstr = []
+            # sample_reconstr = []
             with tf.variable_scope("rnn_decoder"):
                 # outputs = [[] for k in xrange(self.k_traj)]
                 prev = None
-                decoder_inputs = [
+                self.decoder_inputs[obj] = [
                     tf.pad(tf.mul(multipl[k], self.enc_state_x[obj]), [[0, 39], [0, 0]], "CONSTANT")
                     for k in xrange(self.k_traj)]
-
-            # Suspect that IOC is under this loop too
-            for k, inp in enumerate(decoder_inputs):
-                sample_reconstr.append([])
-                state = tf.zeros([1, 48]) # self.enc_state_x[obj]
-                inp = tf.split(0, 2*self.seq_length, inp)
-                for t_step, location in enumerate(inp):
-                    sample_reconstr[k].append([])
+        # for obj in xrange(0, self.args.max_num_obj):
+        # Suspect that IOC is under this loop too
+        for t_step in xrange(0, 2*self.seq_length):
+            # obs_seq x MNP x MNP x (GS**2) tensor
+            # TODO: this is wrong !!
+            current_grid_frame_data = grid_frame_data[t_step]
+            # [[self.sample_reconstr[i][k][0] for k in xrange(self.k_traj)] for i in xrange(self.max_num_obj)]
+            social_tensor = self.get_social_tensor(
+                current_grid_frame_data, self.output_states)
+            for k in xrange(self.k_traj): # self.decoder_inputs[obj]
+                for obj in xrange(self.max_num_obj):
+                    inp = self.decoder_inputs[obj][k]
+                    inp = tf.split(0, 2*self.seq_length, inp)
+                    state = tf.zeros([1, 48])
+                # for t_step, location in enumerate(inp):
+                    # sample_reconstr[k].append([])
                     if k > 0 or t_step > 0:
                         tf.get_variable_scope().reuse_variables()
 
                     with tf.variable_scope("output_onecell") as scope:
-                        if t_step > 0 or obj > 0 or k > 0:
-                            scope.reuse_variables()
-                        self.output_states[obj], state = cells(location, state)
+                        self.output_states[obj][k], state = cells_s(inp[t_step], state)
+                        # scope.reuse_variables()
                         # outputs[k].append(output)
                     if loop_function is not None:
                         prev = output
 
                     with tf.variable_scope("samples"):
-                        sample_reconstr[k][t_step] = tf.nn.xw_plus_b(
-                            self.output_states[obj],
+                        self.sample_reconstr[obj][k][t_step] = tf.nn.xw_plus_b(
+                            self.output_states[obj][k],
                             weights["reconstr_w"],
                             biases["reconstr_b"])
 
-                # seems a bit fishy, is this correct ?
-                with tf.variable_scope("velocity"):
-                    velocity = tf.nn.relu(tf.nn.xw_plus_b( \
-                        tf.squeeze(
-                            tf.nn.conv1d(
-                                tf.reshape(sample_reconstr[k], [1, 2*self.seq_length, 2]),
-                                weights["velocity_w"],
-                                self.strides,
-                                padding='SAME'
-                                ), [0]),
-                        weights["velocityp_w"],
-                        biases["velocityp_b"]))
-
-                # feature pooling
-                for t_step, location in enumerate(inp):
-                    # Obtained by multiplying the static context tensor
-                    # by the indicator matrix. Resulting in a 32x2 tensor
-                    # Multiply this by the sample reconstruction tensor of size 1x2
-                    # Result is 1x32
+                    # feature pooling
+                    # for t_step, location in enumerate(inp):
+                        # Obtained by multiplying the static context tensor
+                        # by the indicator matrix. Resulting in a 32x2 tensor
+                        # Multiply this by the sample reconstruction tensor of size 1x2
+                        # Result is 1x32
                     with tf.variable_scope("static_pool"):
                         pooled_static = tf.reshape(
                             tf.matmul(
@@ -415,27 +464,50 @@ class DESIREModel(object):
                                               self.features_batch[t_step][obj][h])
                                     for h in xrange(self.height/2)
                                 ]),
-                                tf.transpose(sample_reconstr[k][t_step])),
+                                tf.transpose(self.sample_reconstr[obj][k][t_step])),
                             [1, 2*self.out_channels])
 
-                    # obs_seq x MNP x MNP x (GS**2) tensor
-                    current_grid_frame_data = grid_frame_data[t_step]
-                    social_tensor = self.get_social_tensor(
-                        current_grid_frame_data, self.output_states)
-                    social_input = tf.slice(
-                        social_tensor,
-                        [obj, 0],
-                        [1, self.radial_bin*self.angular_bin*self.rnn_size])
-                    # Embed the tensor input
-                    embedded_social_input = tf.nn.relu(
-                        tf.nn.xw_plus_b(social_input, weights["social_w"], biases["social_b"]))
+                    with tf.name_scope("social_pool"):
+                        social_input = tf.slice(
+                            social_tensor,
+                            [obj, 0],
+                            [1, self.radial_bin*self.angular_bin*self.rnn_size])
+                        # Embed the tensor input
+                        embedded_social_input = tf.nn.relu(
+                            tf.nn.xw_plus_b(social_input, weights["social_w"], biases["social_b"]))
+
+                    # seems a bit fishy, is this correct each t-step the velocity
+                    # changes as there's more information ??
+                    # alternatively, compute in the end for all t-steps at once
+                    with tf.variable_scope("velocity"):
+                        velocity = tf.nn.relu(tf.nn.xw_plus_b( \
+                            tf.squeeze(
+                                tf.nn.conv1d(
+                                    tf.reshape(
+                                        tf.pack(self.sample_reconstr[obj][k], 0),
+                                        [1, 2*self.seq_length, 2]),
+                                    weights["velocity_w"],
+                                    self.strides,
+                                    padding='SAME'
+                                    ), [0]),
+                            weights["velocityp_w"],
+                            biases["velocityp_b"]))
+                        velocity = tf.split(0, 2*self.seq_length, velocity)
+
                     with tf.name_scope("concatenate_scf"):
                         # Concatenate the embeddings
                         complete_input = tf.concat(
                             1,
                             [pooled_static,
-                             tf.reshape(velocity[obj], [1, self.out_channels]),
-                             embedded_social_input])
+                                tf.reshape(velocity[t_step], [1, self.out_channels]),
+                                embedded_social_input])
+
+                    state = self.enc_state_x[obj]
+                    with tf.variable_scope("rnn_decoder_two", tf.get_variable_scope(), reuse=None):
+                        # output_states[obj] = tf.get_variable("output_states",[obj])
+                        self.output_states[obj][k], self.enc_state_x[obj] = \
+                            cells_dtwo(complete_input, state)
+
             # TODO: check if KLD loss actually has reconstruction loss in it
             # TODO: The reconstr loss does not sample from a distribution anymore but instead
             #       chooses the most probable trajectory from the IOC (verify)
@@ -690,7 +762,7 @@ class DESIREModel(object):
         # Create a list of zero tensors each of shape 1 x (GS**2) x RNN_size of length MNP
         social_tensor = tf.split(0, self.max_num_obj, social_tensor)
         # Concatenate list of hidden states to form a tensor of shape MNP x RNN_size
-        hidden_states = tf.concat(0, output_states)
+        hidden_states = tf.concat(1, output_states)
         # Split the grid_frame_data into grid_data for each pedestrians
         # Consists of a list of tensors each of shape 1 x MNP x (GS**2) of length MNP
         grid_frame_ped_data = tf.split(0, self.max_num_obj, grid_frame_data)
@@ -701,7 +773,11 @@ class DESIREModel(object):
         for ped in range(self.max_num_obj):
             # Compute social tensor for the current pedestrian
             with tf.name_scope("tensor_calculation"):
-                social_tensor_ped = tf.matmul(tf.transpose(grid_frame_ped_data[ped]), hidden_states)
+                social_tensor_ped = []
+                for k in xrange(self.k_traj):
+                    social_tensor_ped.append(tf.matmul(tf.transpose(grid_frame_ped_data[ped]), hidden_states[k]))
+                social_tensor_ped = tf.add_n(social_tensor_ped)
+                # social_tensor_ped = tf.matmul(tf.transpose(grid_frame_ped_data[ped]), hidden_states)
                 social_tensor[ped] = tf.reshape(
                     social_tensor_ped,
                     [1, self.radial_bin*self.angular_bin, self.rnn_size])
