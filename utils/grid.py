@@ -8,19 +8,16 @@ from math import *
 
 import numpy as np
 
-def get_grid_mask(frame, dimensions, neighborhood_size, grid_size):
+
+def get_grid_mask(frame, dmin=1, dmax=40):
     '''
     This function computes the binary mask that represents the
     occupancy of each ped in the other's grid
     params:
     frame : This will be a MNP x 3 matrix with each row being [pedID, x, y]
-    dimensions : This will be a list [width, height]
-    neighborhood_size : Scalar value representing the size of neighborhood considered
     grid_size : Scalar value representing the size of the grid discretization
     '''
 
-    dmin = 1
-    dmax = 40
     radial_bin_discr = np.logspace(
         start=log(dmin, 2),
         stop=log(dmax, 2),
@@ -94,12 +91,10 @@ def get_grid_mask(frame, dimensions, neighborhood_size, grid_size):
 def get_location_mask(frame, dimensions):
     '''
     This function computes the binary mask that represents the
-    occupancy of each ped in the other's grid
+    location of each agent
     params:
-    frame : This will be a MNP x 3 matrix with each row being [pedID, x, y]
+    frame : This will be a MNO x 3 matrix with each row being [objID, x, y]
     dimensions : This will be a list [width, height]
-    neighborhood_size : Scalar value representing the size of neighborhood considered
-    grid_size : Scalar value representing the size of the grid discretization
     '''
     mno = frame.shape[0]
     width, height = dimensions[0], dimensions[1]
@@ -125,12 +120,10 @@ def get_location_mask(frame, dimensions):
 
 def get_sequence_location_mask(sequence, dimensions):
     '''
-    Get the position masks for all the frames in the sequence
+    Get the sequence locations mask
     params:
-    sequence : A numpy matrix of shape SL x MNP x 3
+    sequence : A numpy matrix of shape SL x MNO x 3
     dimensions : This will be a list [width, height]
-    neighborhood_size : Scalar value representing the size of neighborhood considered
-    grid_size : Scalar value representing the size of the grid discretization
     '''
     _sl = sequence.shape[0]
     mno = sequence.shape[1]
@@ -142,15 +135,11 @@ def get_sequence_location_mask(sequence, dimensions):
 
     return sequence_mask
 
-
-def get_sequence_grid_mask(sequence, dimensions, neighborhood_size, grid_size):
+def get_sequence_grid_mask(sequence):
     '''
     Get the grid masks for all the frames in the sequence
     params:
     sequence : A numpy matrix of shape SL x MNO x 3
-    dimensions : This will be a list [width, height]
-    neighborhood_size : Scalar value representing the size of neighborhood considered
-    grid_size : Scalar value representing the size of the grid discretization
     '''
     _sl = sequence.shape[0]
     mno = sequence.shape[1]
@@ -158,7 +147,6 @@ def get_sequence_grid_mask(sequence, dimensions, neighborhood_size, grid_size):
 
     for i in range(_sl):
         sequence_mask[i, :, :, :] = \
-            get_grid_mask(sequence[i, :, :], dimensions,
-                          neighborhood_size, grid_size)
+            get_grid_mask(sequence[i, :, :])
 
     return sequence_mask
