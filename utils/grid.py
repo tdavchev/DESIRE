@@ -40,25 +40,12 @@ def get_grid_mask(frame, frame_ids, dmin=1, dmax=40):
         for i in xrange(mno)]
     # For each ped in the frame (existent and non-existent)
     for pedindex in range(mno):
-        #If pedID is zero, then non-existent ped
-        # carry = tf.select(
-        #     tf.equal(
-        #         tf.squeeze(
-        #             frame_ids[pedindex], [0]),
-        #         tf.zeros([1])),
-        #     true, false)
-        # if carry:
-        #     # Binary mask should be zero for non-existent ped
-        #     continue
         for k_traj in range(ktraj):
             # Get x and y of the current ped
             current_x, current_y = frame[pedindex][k_traj][0], frame[pedindex][k_traj][1]
             # For all the other peds
             for otherpedindex in range(mno):
                 # If the other pedID is the same as current pedID
-                # if frame_ids[otherpedindex, 0] == frame_ids[pedindex, 0]:
-                #     # The ped cannot be counted in his own grid
-                #     continue
 
                 for k in range(ktraj):
                     angular_bin = tf.split(0, 6, tf.zeros([6]))
@@ -66,12 +53,8 @@ def get_grid_mask(frame, frame_ids, dmin=1, dmax=40):
                     # Get x and y of the other ped
                     other_x, other_y = \
                         frame[otherpedindex][k_traj][0], frame[otherpedindex][k_traj][1]
-                    # coordinate = 1
 
                     # Calculate the radius and angle for the log-polar coordinate
-                    # radius = log(np.sqrt(
-                    #     (other_x - current_x)^2 + (other_y - current_y)^2
-                    # ))
                     radius = tf.log(
                         tf.sqrt(
                             tf.add(
@@ -79,7 +62,6 @@ def get_grid_mask(frame, frame_ids, dmin=1, dmax=40):
                                     tf.sub(other_x, current_x)),
                                 tf.square(
                                     tf.sub(other_y, current_y)))))
-                    # theta = np.arctan2(current_x - other_x, current_y - other_y)
                     theta = tf.atan(
                         tf.divide(
                             tf.sub(other_x, current_x),
@@ -180,66 +162,15 @@ def get_grid_mask(frame, frame_ids, dmin=1, dmax=40):
                             )),
                         [tf.add(angular_bin[5], tf.constant(1.0))],
                         [angular_bin[5]])
-                    # theta = tf.select(
-                    #     tf.logical_and(
-                    #         tf.less(
-                    #             tf.sub(other_x, current_x),
-                    #             tf.constant(0)
-                    #         ),
-                    #         tf.less(
-                    #             tf.sub(other_y, current_y),
-                    #             tf.constant(0)
-                    #         )),
-                    #     tf.add(theta, tf.constant(180)),
-                    #     theta)
-                    # theta = tf.select(
-                    #     tf.logical_and(
-                    #         tf.less(
-                    #             tf.sub(other_x, current_x),
-                    #             tf.constant(0)
-                    #         ),
-                    #         tf.greater(
-                    #             tf.sub(other_y, current_y),
-                    #             tf.constant(0)
-                    #         )),
-                    #     tf.add(theta, tf.constant(90)),
-                    #     theta)
-                    # theta = tf.select(
-                    #     tf.logical_and(
-                    #         tf.greater(
-                    #             tf.sub(other_x, current_x),
-                    #             tf.constant(0)
-                    #         ),
-                    #         tf.less(
-                    #             tf.sub(other_y, current_y),
-                    #             tf.constant(0)
-                    #         )),
-                    #     tf.add(tf.abs(theta), tf.constant(270)),
-                    #     theta)
-                    # if other_x - current_x < 0:
-                    #     if other_y - current_y < 0:
-                    #         # coordinate = 3
-                    #         theta += 180
-                    #     else:
-                    #         # coordinate = 2
-                    #         theta += 90
-                    # else:
-                    #     if other_y - current_x < 0:
-                    #         # coordinate = 4
-                    #         theta = np.abs(theta) + 270
                     radius = tf.select(
                         tf.logical_and(
                             tf.greater(radius, tf.constant(dmax, dtype=tf.float32)),
                             tf.less(radius, tf.constant(dmin, dtype=tf.float32))),
                         [tf.constant(0.0)], [radius[0]])
-                    # if radius > dmax and radius < dmin:
-                    #     # Ped not in surrounding, so binary mask should be zero
-                    #     continue
+
                     radial_bin = [0]
                     # If in surrounding, calculate the grid cell
                     for i in xrange(1, len(radial_bin_discr)):
-                        # i po-golqmo ot predniq !!!
-                        # for y in xrange(1, 6):
                         radial_bin[i] = \
                             tf.select(
                                 tf.logical_and(
@@ -251,22 +182,6 @@ def get_grid_mask(frame, frame_ids, dmin=1, dmax=40):
                     # This won't work, radial bin and angular bin are converted to tensors ..
                     # frame_mask[pedindex][ktraj][otherpedindex] = [angular_bin[0], radial_bin[0]]
 
-
-                    # for i in xrange(radial_bin_discr):
-                    #     if radius <= radial_bin_discr[i]:
-                    #         radial_bin = i
-                    #         angular_bin = theta / (360/60)
-                    #         break
-
-                    # Other ped is in the corresponding grid cell of current ped
-                    # frame_mask[
-                    #     pedindex,
-                    #     k_traj,
-                    #     otherpedindex,
-                    #     radial_bin + angular_bin*6
-                    # ].append((otherpedindex, k_traj))
-                # frame_mask[pedindex] = \
-                #     frame_mask[pedindex, k_traj]/np.sum(frame_mask[pedindex], axis=0, dtype=np.float32)
     return frame_mask
 
 
