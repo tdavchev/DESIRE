@@ -19,6 +19,8 @@ import tensorflow as tf
 from tensorflow.python.ops import rnn, rnn_cell, seq2seq
 from tensorflow.python.framework import dtypes
 
+execfile("utils/grid.py")
+
 sys.path.append("/home/s1045064/deep-learning/DESIRE")
 # from convolutional_vae_util import deconv2d
 
@@ -99,6 +101,7 @@ class DESIREModel(object):
             [
                 2*self.seq_length,
                 self.max_num_obj,
+                self.k_traj,
                 self.max_num_obj,
                 self.radial_bin*self.angular_bin
             ],
@@ -146,6 +149,9 @@ class DESIREModel(object):
             temporal_shape
         )
         temporal_ids = self.input_data[:, :, 2:]
+        temporal_ids = [
+            tf.split(0, self.seq_length, temporal_ids[i])
+            for i in xrange(self.max_num_obj)]
 
         with tf.variable_scope("temporal_convolution"):
             self.temporal_input = tf.nn.relu(tf.add( \
@@ -164,6 +170,9 @@ class DESIREModel(object):
             temporal_shape_y
         )
         temporal_ids_y = self.target_data[:, :, 2:]
+        temporal_ids_y = [
+            tf.split(0, 2*self.seq_length, temporal_ids_y[i])
+            for i in xrange(self.max_num_obj)]
 
         with tf.variable_scope("temporal_convolution_y"):
             self.temporal_input_y = tf.nn.relu(tf.add( \
@@ -409,26 +418,44 @@ class DESIREModel(object):
                 # multipl = tf.nn.relu(multipl)
                 multipl = tf.nn.softmax(multipl)
 
-            output = []
-            loop_function = None
-            # sample_reconstr = []
             with tf.variable_scope("rnn_decoder"):
                 # outputs = [[] for k in xrange(self.k_traj)]
                 prev = None
                 self.decoder_inputs[obj] = [
                     tf.pad(tf.mul(multipl[k], self.enc_state_x[obj]), [[0, 39], [0, 0]], "CONSTANT")
                     for k in xrange(self.k_traj)]
+
         # for obj in xrange(0, self.args.max_num_obj):
         # Suspect that IOC is under this loop too
+        sample_reconstr = [
+            [
+                [
+                    [tf.zeros([1, 2])] for z in xrange(2*self.seq_length)]
+                for y in xrange(self.k_traj)]
+            for i in xrange(self.max_num_obj)]
+        output = []
+        loop_function = None # what is this for ?
         for t_step in xrange(0, 2*self.seq_length):
             # obs_seq x MNP x MNP x (GS**2) tensor
             # TODO: this is wrong !!
-            current_grid_frame_data = grid_frame_data[t_step]
-            # [[self.sample_reconstr[i][k][0] for k in xrange(self.k_traj)] for i in xrange(self.max_num_obj)]
+            cur_frame_ids = [
+                    temporal_ids[i][t_step]
+                for i in xrange(self.max_num_obj)]
+            current_frame = [
+                [
+                    self.sample_reconstr[i][k][t_step]
+                    for k in xrange(self.k_traj)]
+                for i in xrange(self.max_num_obj)]
+            # very, very expensive
+            current_grid_frame_data, occurances = get_grid_mask(current_frame, cur_frame_ids)
+            #grid_frame_data[t_step]
+            # [[self.sample_reconstr[i][k][t_step] for k in xrange(self.k_traj)] for i in xrange(self.max_num_obj)]
             social_tensor = self.get_social_tensor(
-                current_grid_frame_data, self.output_states)
+                current_grid_frame_data, occurances, self.output_states)
             for k in xrange(self.k_traj): # self.decoder_inputs[obj]
                 for obj in xrange(self.max_num_obj):
+                    current_y_id = temporal_ids_y[obj][t_step]
+                    current_y_id = temporal_ids[obj][t_step]
                     inp = self.decoder_inputs[obj][k]
                     inp = tf.split(0, 2*self.seq_length, inp)
                     state = tf.zeros([1, 48])
@@ -524,7 +551,7 @@ class DESIREModel(object):
                 # E[log P(X|z)]
                 recon_loss = tf.reduce_sum(
                     tf.nn.sigmoid_cross_entropy_with_logits(logits=logits, targets=X), 1)
-                # D_KL(Q(z|X) || P(z|X)); calculate in closed form as both dist. are Gaussian
+              radial_bin  # D_KL(Q(z|X) || P(z|X)); calculate in closed form as both dist. are Gaussian
                 kl_loss = 0.5 * tf.reduce_sum(tf.exp(z_logvar) + z_mu**2 - 1. - z_logvar, 1)
                 # VAE loss
                 vae_loss = tf.reduce_mean(recon_loss + kl_loss)
@@ -747,7 +774,7 @@ class DESIREModel(object):
         '''
         location_tensor = tf.zeros([self.height/2, self.width/2])
         # features_data_obj = tf.split()
-    def get_social_tensor(self, grid_frame_data, output_states):
+    def get_social_tensor(self, grid_frame_data, occurances, output_states):
         '''
         Modified from: https://github.com/vvanirudh/social-lstm-tf
         Computes the social tensor for all the maxNumPeds in the frame
@@ -757,37 +784,62 @@ class DESIREModel(object):
         '''
         # Create a zero tensor of shape MNP x (GS**2) x RNN_size
         social_tensor = tf.zeros(
-            [self.max_num_obj, self.radial_bin*self.angular_bin, self.rnn_size],
+            [self.max_num_obj, self.k_traj, self.radial_bin*self.angular_bin, self.rnn_size],
             name="social_tensor")
         # Create a list of zero tensors each of shape 1 x (GS**2) x RNN_size of length MNP
         social_tensor = tf.split(0, self.max_num_obj, social_tensor)
+        social_tensor = [tf.split(0, self.k_traj, tf.squeeze(social_tensor[i], [0])) for i in xrange(self.max_num_obj)]
+        social_tensor = [[tf.squeeze(social_tensor[i][y], [0]) for y in xrange(self.k_traj)] for i in xrange(self.max_num_obj)]
         # Concatenate list of hidden states to form a tensor of shape MNP x RNN_size
-        hidden_states = tf.concat(1, output_states)
+        # hidden_states = tf.concat(1, output_states)
         # Split the grid_frame_data into grid_data for each pedestrians
+        grid_frame_ped_data = [
+            [
+                [
+                    [
+                        tf.reshape(grid_frame_data[obj][k][other_obj][other_k], [1, 36])
+                        for other_k in xrange(self.k_traj)]
+                    for other_obj in xrange(self.max_num_obj)]
+                for k in xrange(self.k_traj)]
+            for obj in xrange(self.max_num_obj)]
+        occurances = [
+            [
+                tf.reshape(occurances[i][j], [1, 36])
+                for j in xrange(self.k_traj)]
+            for i in xrange(self.max_num_obj)]
         # Consists of a list of tensors each of shape 1 x MNP x (GS**2) of length MNP
-        grid_frame_ped_data = tf.split(0, self.max_num_obj, grid_frame_data)
+        # grid_frame_ped_data = tf.split(0, self.max_num_obj, grid_frame_data)
         # Squeeze tensors to form MNP x (GS**2) matrices
-        grid_frame_ped_data = [tf.squeeze(input_, [0]) for input_ in grid_frame_ped_data]
+        # grid_frame_ped_data = [tf.squeeze(input_, [0]) for input_ in grid_frame_ped_data]
 
         # For each pedestrian
         for ped in range(self.max_num_obj):
             # Compute social tensor for the current pedestrian
             with tf.name_scope("tensor_calculation"):
-                social_tensor_ped = []
                 for k in xrange(self.k_traj):
-                    social_tensor_ped.append(tf.matmul(tf.transpose(grid_frame_ped_data[ped]), hidden_states[k]))
-                social_tensor_ped = tf.add_n(social_tensor_ped)
-                # social_tensor_ped = tf.matmul(tf.transpose(grid_frame_ped_data[ped]), hidden_states)
-                social_tensor[ped] = tf.reshape(
-                    social_tensor_ped,
-                    [1, self.radial_bin*self.angular_bin, self.rnn_size])
+                    social_tensor_ped = []
+                    for otherped in xrange(self.max_num_obj):
+                        for other_k in xrange(self.k_traj):
+                            social_tensor_ped.append(
+                                tf.matmul(
+                                    tf.transpose(
+                                        grid_frame_ped_data[ped][k][otherped][other_k]),
+                                    output_states[otherped][k]))
+
+                    print "haha"
+                    social_tensor_ped = tf.add_n(social_tensor_ped)
+                    social_tensor_ped = tf.divide(social_tensor_ped, tf.transpose(occurances[ped][k]))
+
+                    social_tensor[ped][k] = tf.reshape(
+                        social_tensor_ped,
+                        [1, self.radial_bin*self.angular_bin, self.rnn_size])
 
         # Concatenate the social tensor from a list to a tensor of shape MNP x (GS**2) x RNN_size
-        social_tensor = tf.concat(0, social_tensor)
+        social_tensor = tf.concat(1, social_tensor)
         # Reshape the tensor to match the dimensions MNP x (GS**2 * RNN_size)
         social_tensor = tf.reshape(
             social_tensor,
-            [self.max_num_obj, self.radial_bin*self.angular_bin*self.rnn_size])
+            [self.max_num_obj, self.k_traj, self.radial_bin*self.angular_bin*self.rnn_size])
 
         return social_tensor
 

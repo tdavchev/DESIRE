@@ -29,12 +29,13 @@ def get_grid_mask(frame, frame_ids, dmin=1, dmax=40):
     mno = len(frame)#frame.shape[0]
     ktraj = len(frame[1])#frame.shape[1]
     frame = [[tf.split(0, 2, frame[o][k][0]) for k in xrange(ktraj)] for o in xrange(mno)]
+    cost = [[[tf.zeros(1) for i in xrange(36)] for i in xrange(ktraj)] for y in xrange(mno)]
     frame_mask = [
         [
             [
                 [
                     [tf.zeros(1) for r in xrange(36)]
-                    for e in xrange(ktraj)]
+                    for y in xrange(ktraj)]
                 for z in xrange(mno)]
             for y in xrange(ktraj)]
         for i in xrange(mno)]
@@ -168,7 +169,7 @@ def get_grid_mask(frame, frame_ids, dmin=1, dmax=40):
                             tf.less(radius, tf.constant(dmin, dtype=tf.float32))),
                         [tf.constant(0.0)], [radius[0]])
 
-                    radial_bin = [0]
+
                     # If in surrounding, calculate the grid cell
                     for i in xrange(1, len(radial_bin_discr)):
                         radial_bin[i] = \
@@ -178,11 +179,38 @@ def get_grid_mask(frame, frame_ids, dmin=1, dmax=40):
                                     tf.greater_equal(radius, rbd_tensor[i-1])),
                                 [tf.add(radial_bin[i], tf.constant(1.0))],
                                 [radial_bin[i]])
+
                     # Then I will know which otherpeds are in a given cell i.e. 23
                     # This won't work, radial bin and angular bin are converted to tensors ..
                     # frame_mask[pedindex][ktraj][otherpedindex] = [angular_bin[0], radial_bin[0]]
+                    for rb in xrange(0, len(radial_bin_discr)):
+                        for ab in xrange(0, 6):
+                            # radial_bin + angular_bin*6
+                            frame_mask[pedindex][k_traj][otherpedindex][k][rb + ab*6] = \
+                                tf.select(
+                                    tf.logical_and(
+                                        tf.equal(radial_bin[rb], tf.constant(1.0)),
+                                        tf.equal(angular_bin[ab], tf.constant(1.0))),
+                                    [tf.add(
+                                        frame_mask[pedindex][k_traj][otherpedindex][k][rb + ab*6],
+                                        tf.constant(1.0))],
+                                    [frame_mask[pedindex][k_traj][otherpedindex][k][rb + ab*6]])
+                            cost[pedindex][k_traj][rb+ab*6] = \
+                                tf.select(
+                                    tf.logical_and(
+                                        tf.equal(radial_bin[rb], tf.constant(1.0)),
+                                        tf.equal(angular_bin[ab], tf.constant(1.0))),
+                                    [tf.add(
+                                        cost[pedindex][k_traj][rb+ab*6],
+                                        tf.constant(1.0))],
+                                    [cost[pedindex][k_traj][rb+ab*6]])
+                            cost[pedindex][k_traj][rb+ab*6] = tf.squeeze(cost[pedindex][k_traj][rb+ab*6], [0])
+                            frame_mask[pedindex][k_traj][otherpedindex][k][rb + ab*6] = \
+                                tf.squeeze(
+                                    frame_mask[pedindex][k_traj][otherpedindex][k][rb + ab*6],
+                                    [0])
 
-    return frame_mask
+    return frame_mask, cost
 
 
 # def get_grid_mask(frame, dmin=1, dmax=40):
