@@ -15,8 +15,8 @@ import ipdb
 import numpy as np
 import tensorflow as tf
 
-execfile("utils/data_loader.py")
-execfile("model/model.py")
+import desire.utils.data_loader as dl
+# from desire.model import model
 
 # from grid import getSequenceGridMask
 
@@ -96,14 +96,14 @@ def train(args):
     The actual train function
     '''
     # Create the DataLoader object
-    data_loader = DataLoader(args.batch_size, args.seq_length,
+    data_loader = dl.DataLoader(args.batch_size, args.seq_length,
                              args.max_num_obj, args.leave_dataset, preprocess=False)
 
     with open(os.path.join('save', 'config.pkl'), 'wb') as file:
         pickle.dump(args, file)
 
     # Create a model object with the arguments
-    model = DESIREModel(args)
+    model = model.DESIREModel(args)
 
     # Initialize a TensorFlow session
     with tf.Session() as sess:
@@ -203,7 +203,7 @@ def train(args):
                         checkpoint_path,
                         global_step=epoch * data_loader.num_batches + batch
                     )
-                    print "model saved to {}".format(checkpoint_path)
+                    print("model saved to {}".format(checkpoint_path))
                     sys.stdout.flush()
 
 if __name__ == '__main__':

@@ -13,7 +13,7 @@ for subdir, dirs, files in os.walk(ROOT_DIR):
             ids, frames = [], []
             xs, ys = [], []
             with open(os.path.join(subdir, file), "rb") as f:
-                print os.path.join(subdir, file)
+                print(os.path.join(subdir, file))
                 for line in f:
                     line = line.strip()
                     line = line.split(" ")

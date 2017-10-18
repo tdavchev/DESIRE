@@ -32,7 +32,7 @@ class DataLoader(object):
         '''
         # Number of datasets
         self.leave_dataset = leave_dataset
-
+        print(self.leave_dataset)
         # Data directory where the pre-processed pickle file resides
         self.data_dir = 'data/'
 
@@ -52,7 +52,7 @@ class DataLoader(object):
 
         # If the file doesn't exist or forcePreProcess is true
         if not os.path.exists(data_file) or preprocess:
-            print "Creating pre-processed data from raw data"
+            print("Creating pre-processed data from raw data")
             sys.stdout.flush()
             # Preprocess the data from the csv files of the datasets
             # Note that this data is processed in frames
@@ -171,7 +171,7 @@ class DataLoader(object):
         for dataset, _data in enumerate(self.data):
             # get the frame data for the current dataset
             all_frame_data = self.data[dataset]
-            print len(all_frame_data)
+            print(len(all_frame_data))
             sys.stdout.flush()
             # Increment the counter with the number of sequences in the current dataset
             counter += int(len(all_frame_data) / (self.seq_length+2))

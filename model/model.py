@@ -10,17 +10,19 @@ import copy
 import random
 import time
 import sys
+import os
 
 # from grid import getSequenceGridMask
 import ipdb
 import numpy as np
 import prettytensor as pt
 import tensorflow as tf
-from tensorflow.python.ops import rnn, rnn_cell, seq2seq
+from tensorflow.python.ops import rnn, rnn_cell#, seq2seq
+import tensorflow.contrib.seq2seq as seq2seq
 from tensorflow.python.framework import dtypes
 
-sys.path.append("/home/s1045064/deep-learning/DESIRE")
-execfile("utils/convolutional_vae_util.py")
+sys.path.append("/home/todor/Documents/workspace/DESIRE")
+exec(open("utils/convolutional_vae_util.py").read())
 # from convolutional_vae_util import deconv2d
 
 
@@ -639,7 +641,7 @@ class DESIREModel(object):
         prev_target_data = np.reshape(true_traj[traj.shape[0]], (1, self.args.max_num_obj, 3))
         # Prediction
         for t_step in range(num):
-            print "**** NEW PREDICTION TIME STEP", t_step, "****"
+            print("**** NEW PREDICTION TIME STEP", t_step, "****")
             sys.stdout.flush()
             feed = {
                 self.input_data: prev_data,
@@ -648,7 +650,7 @@ class DESIREModel(object):
             }
             [output, states, cost] = sess.run(
                 [self.final_output, self.final_states, self.cost], feed)
-            print "Cost", cost
+            print("Cost", cost)
             sys.stdout.flush()
             # Output is a list of lists where the inner lists contain matrices of shape 1x5.
             # The outer list contains only one element (since seq_length=1) and the inner list
@@ -667,12 +669,12 @@ class DESIREModel(object):
                     next_y = 1.0
 
                 if prev_data[0, objindex, 0] != 0:
-                    print "Pedestrian ID", prev_data[0, objindex, 0]
-                    print "Predicted parameters", mux, muy, sx_val, sy_val, corr
-                    print "New Position", next_x, next_y
-                    print "Target Position", prev_target_data[0, objindex, 1], \
-                        prev_target_data[0, objindex, 2]
-                    print
+                    print("Pedestrian ID", prev_data[0, objindex, 0])
+                    print("Predicted parameters", mux, muy, sx_val, sy_val, corr)
+                    print("New Position", next_x, next_y)
+                    print("Target Position", prev_target_data[0, objindex, 1], \
+                        prev_target_data[0, objindex, 2])
+                    print()
                     sys.stdout.flush()
 
                 newpos[0, objindex, :] = [prev_data[0, objindex, 0], next_x, next_y]
