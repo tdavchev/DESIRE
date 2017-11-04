@@ -49,14 +49,14 @@ class DataLoader(object):
 
         # Define the path in which the process data would be stored
         data_file = os.path.join(self.data_dir, "trajectories.cpkl")
-
+        self.frame_preprocess(data_file)
         # If the file doesn't exist or forcePreProcess is true
-        if not os.path.exists(data_file) or preprocess:
-            print("Creating pre-processed data from raw data")
-            sys.stdout.flush()
-            # Preprocess the data from the csv files of the datasets
-            # Note that this data is processed in frames
-            self.frame_preprocess(data_file)
+        # if not os.path.exists(data_file) or preprocess:
+        #     print("Creating pre-processed data from raw data")
+        #     sys.stdout.flush()
+        #     # Preprocess the data from the csv files of the datasets
+        #     # Note that this data is processed in frames
+        #     self.frame_preprocess(data_file)
 
         # Load the processed data from the pickle file
         self.load_preprocessed(data_file)
@@ -83,9 +83,12 @@ class DataLoader(object):
         num_obj_data = []
         # Index of the current dataset
         dataset_index = 0
-
+        count = 0
         # For each dataset
         for subdir, dirs, files in os.walk(self.data_dir):
+            if count >= 2:
+                break
+            count += 1
             for file in files:
                 # if dataset_index != leave_dataset and \
                 if dataset_index < self.leave_dataset and \
