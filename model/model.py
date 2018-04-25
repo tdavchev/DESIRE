@@ -154,7 +154,7 @@ class DESIREModel(object):
                 name="gru_states"
             )
             self.enc_state_x = tf.split(
-                0, self.args.max_num_obj, self.gru_states
+                self.gru_states, self.args.max_num_obj, 0
             )
 
         with tf.variable_scope("gru_states_y"):
@@ -163,31 +163,31 @@ class DESIREModel(object):
                 name="gru_states_y"
             )
             self.enc_state_y = tf.split(
-                0, self.args.max_num_obj, self.gru_states_y
+                self.gru_states_y, self.args.max_num_obj, 0
             )
 
         with tf.variable_scope("feature_pooling"):
             self.f_pool = \
                 tf.zeros([self.args.max_num_obj, 7, self.seq_length, 2*self.channel_multiplier])
             self.feature_pooling = \
-                tf.split(0, self.args.max_num_obj, self.f_pool)
+                tf.split(self.f_pool, self.args.max_num_obj, 0)
             self.feature_pooling = [tf.squeeze(_input, [0]) for _input in self.feature_pooling]
 
         # Define hidden output states for each pedestrian
         with tf.variable_scope("output_states"):
             self.output_states = \
-                tf.split(0, self.args.max_num_obj, \
-                    tf.zeros([self.args.max_num_obj, 7, cells.output_size]))
+                tf.split(tf.zeros([self.args.max_num_obj, 7, cells.output_size]), \
+                    self.args.max_num_obj, 0)
 
         # List of tensors each of shape args.maxNumPedsx3 corresponding to
         # each frame in the sequence
         with tf.name_scope("frame_data_tensors"):
             frame_data = [tf.squeeze(input_, [0]) \
-                for input_ in tf.split(0, self.args.max_num_obj, self.input_data)]
+                for input_ in tf.split(self.input_data, self.args.max_num_obj, 0)]
 
         with tf.name_scope("frame_target_data_tensors"):
             frame_target_data = [tf.squeeze(target_, [0]) \
-                for target_ in tf.split(0, self.args.max_num_obj, self.target_data)]
+                for target_ in tf.split(self.target_data, self.args.max_num_obj, 0)]
 
         # Cost
         with tf.name_scope("Cost_related_stuff"):
@@ -198,8 +198,8 @@ class DESIREModel(object):
         # Containers to store output distribution parameters
         with tf.name_scope("Distribution_parameters_stuff"):
             self.initial_output = \
-                tf.split(0, self.args.max_num_obj, \
-                    tf.zeros([self.args.max_num_obj, self.output_size]))
+                tf.split(tf.zeros([self.args.max_num_obj, self.output_size]), \
+                    self.args.max_num_obj, 0)
 
         # Tensor to represent non-existent ped
         with tf.name_scope("Non_existent_obj_stuff"):
@@ -214,20 +214,20 @@ class DESIREModel(object):
             obj_id = frame_data[obj][0][0]
             with tf.name_scope("extract_input_obj"):
                 spatial_input_x = tf.split(
-                    0, self.seq_length,
                     tf.squeeze(tf.slice(
                         frame_data,
                         [obj, 0, 1],
                         [1, self.seq_length, 2]
-                    ), [0])
+                    ), [0]),
+                    self.seq_length, 0
                 )
                 spatial_input_y = tf.split(
-                    0, self.seq_length,
                     tf.squeeze(tf.slice(
                         frame_target_data,
                         [obj, 0, 1],
                         [1, self.seq_length, 2]
-                    ), [0])
+                    ), [0]),
+                    self.seq_length, 0
                 )
 
             with tf.variable_scope("encoding_operations_x", \
@@ -285,7 +285,7 @@ class DESIREModel(object):
                         cells)
                 self.output_states[obj] = [
                     tf.split(
-                        0, self.seq_length, tf.squeeze(_item, [0])
+                        tf.squeeze(_item, [0]), self.seq_length, 0
                     ) for _item in self.output_states[obj]]
 
             rho_i = tf.squeeze(self.rho_i, [0])
