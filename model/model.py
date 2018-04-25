@@ -17,8 +17,8 @@ import ipdb
 import numpy as np
 import prettytensor as pt
 import tensorflow as tf
-from tensorflow.python.ops import rnn, rnn_cell#, seq2seq
-import tensorflow.contrib.seq2seq as seq2seq
+from tensorflow.contrib import rnn
+import tensorflow.contrib.legacy_seq2seq as seq2seq
 from tensorflow.python.framework import dtypes
 
 sys.path.append("/home/todor/Documents/workspace/DESIRE")
@@ -134,15 +134,15 @@ class DESIREModel(object):
 
         # Encoder
         with tf.variable_scope("gru_cell"):
-            gru_cell = tf.nn.rnn_cell.GRUCell(self.decoder_output)
-            cells = tf.nn.rnn_cell.MultiRNNCell(
+            gru_cell = rnn.GRUCell(self.decoder_output)
+            cells = rnn.MultiRNNCell(
                 [gru_cell]*self.num_layers,
                 state_is_tuple=False
             )
 
         with tf.variable_scope("gru_y_cell"):
-            gru_cell_y = tf.nn.rnn_cell.GRUCell(self.decoder_output)
-            cells_y = tf.nn.rnn_cell.MultiRNNCell(
+            gru_cell_y = rnn.GRUCell(self.decoder_output)
+            cells_y = rnn.MultiRNNCell(
                 [gru_cell_y]*self.num_layers,
                 state_is_tuple=False
             )
@@ -208,7 +208,7 @@ class DESIREModel(object):
         # for seq, frame in enumerate(frame_data):
         #     current_frame_data = frame  # MNP x 3 tensor
         #     current_target_frame_data = frame_target_data[seq] # MNP x 3 tensor
-        for obj in xrange(0, self.args.max_num_obj):
+        for obj in range(0, self.args.max_num_obj):
             # does this assume that every next sequence will depend on the previous ?
             # not sure since it will only produce K and then choose 1 out of them
             obj_id = frame_data[obj][0][0]
@@ -233,16 +233,16 @@ class DESIREModel(object):
             with tf.variable_scope("encoding_operations_x", \
                         reuse=True if obj > 0 else None):
                 _, self.enc_state_x[obj] = \
-                    rnn.rnn(cells, spatial_input_x, dtype=dtypes.float32)
+                    rnn.static_rnn(cells, spatial_input_x, dtype=dtypes.float32)
 
             with tf.variable_scope("encoding_operations_y", \
                         reuse=True if obj > 0 else None):
                 _, self.enc_state_y[obj] = \
-                    rnn.rnn(cells_y, spatial_input_y, dtype=dtypes.float32)
+                    rnn.static_rnn(cells_y, spatial_input_y, dtype=dtypes.float32)
 
             with tf.name_scope("concatenate_embeddings"):
                 # Concatenate the summaries c1 and c2
-                complete_input = tf.concat(1, [self.enc_state_x[obj], self.enc_state_y[obj]])
+                complete_input = tf.concat([self.enc_state_x[obj], self.enc_state_y[obj]], 1)
 
             # fc layer
             with tf.variable_scope("fc_c"):
@@ -261,7 +261,7 @@ class DESIREModel(object):
                     if z_log_sigma_sq.get_shape().as_list()[0] is not None else self.batch_size
                 eps = tf.random_normal(
                     [eps_batch, self.latent_size], 0.0, 1.0, dtype=tf.float32)
-                zval = tf.add(z_mean, tf.mul(tf.sqrt(tf.exp(z_log_sigma_sq)), eps))
+                zval = tf.add(z_mean, tf.multiply(tf.sqrt(tf.exp(z_log_sigma_sq)), eps))
                 # Get the reconstructed mean from the decoder
                 x_reconstr_mean = \
                     self.vae_decoder(zval, self.vae_input_size)
@@ -277,7 +277,7 @@ class DESIREModel(object):
 
             # Decoder 1
             with tf.variable_scope("hidden_states", reuse=True if obj > 0 else None):
-                hidden_state_x = [tf.mul(multipl, self.enc_state_x[obj]) for i in xrange(7)]
+                hidden_state_x = [tf.multiply(multipl, self.enc_state_x[obj]) for i in range(7)]
                 self.output_states[obj], self.enc_state_x[obj] = \
                     seq2seq.rnn_decoder(
                         hidden_state_x,
@@ -291,22 +291,22 @@ class DESIREModel(object):
             rho_i = tf.squeeze(self.rho_i, [0])
             rho_i = tf.squeeze(rho_i, [1])
             pooling_list = []
-            for prediction_k in xrange(len(self.output_states[obj])):
+            for prediction_k in range(len(self.output_states[obj])):
                 pooling_list.append([])
-                for step_t in xrange(len(self.output_states[obj][prediction_k])):
+                for step_t in range(len(self.output_states[obj][prediction_k])):
                     pooling_list[prediction_k].append(
                         tf.concat(
-                            0, [tf.multiply
-                                (
-                                    self.output_states[obj][prediction_k][step_t][0],
-                                    rho_i[obj][:100]
-                                ),
-                                tf.multiply
-                                (
-                                    self.output_states[obj][prediction_k][step_t][1],
-                                    rho_i[obj][100:]
-                                )]
-                            ))
+                            [tf.multiply
+                            (
+                                self.output_states[obj][prediction_k][step_t][0],
+                                rho_i[obj][:100]
+                            ),
+                            tf.multiply
+                            (
+                                self.output_states[obj][prediction_k][step_t][1],
+                                rho_i[obj][100:]
+                            )], 0
+                        ))
 
             self.feature_pooling[obj] = tf.pack(pooling_list)
             # FROM HERE ON WE NEED TO IMPROVE !!!
@@ -365,7 +365,7 @@ class DESIREModel(object):
                     self.counter, \
                     tf.add(self.counter, self.increment))
 
-        for sequence in xrange(7):
+        for sequence in range(7):
             [o_mux, o_muy, o_sx, o_sy, o_corr] = np.split(self.initial_output[0], 5, 0)
             mux, muy, sx_val, sy_val, corr = \
                     o_mux[0], o_muy[0], np.exp(o_sx[0]), np.exp(o_sy[0]), np.tanh(o_corr[0])
@@ -379,7 +379,7 @@ class DESIREModel(object):
         tvars = tf.trainable_variables()
 
         # Get the final LSTM states
-        self.final_states = tf.concat(0, self.enc_state_x)
+        self.final_states = tf.concat(self.enc_state_x, 0)
 
         # Get the final distribution parameters
         self.final_output = self.initial_output
@@ -509,15 +509,15 @@ class DESIREModel(object):
         normx = tf.sub(x_val, mux)
         normy = tf.sub(y_val, muy)
         # Calculate sx_val*sy_val
-        sxsy = tf.mul(sx_val, sy_val)
+        sxsy = tf.multiply(sx_val, sy_val)
         # Calculate the exponential factor
         z_val = tf.square(tf.div(normx, sx_val)) + tf.square(tf.div(normy, sy_val)) \
-            - 2*tf.div(tf.mul(rho, tf.mul(normx, normy)), sxsy)
+            - 2*tf.div(tf.multiply(rho, tf.multiply(normx, normy)), sxsy)
         neg_rho = 1 - tf.square(rho)
         # Numerator
         result = tf.exp(tf.div(-z_val, 2*neg_rho))
         # Normalization constant
-        denom = 2 * np.pi * tf.mul(sxsy, tf.sqrt(neg_rho))
+        denom = 2 * np.pi * tf.multiply(sxsy, tf.sqrt(neg_rho))
         # Final PDF calculation
         result = tf.div(result, denom)
         return result
